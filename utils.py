@@ -1,6 +1,7 @@
 import json
 
 import torch
+from qwen_vl_utils import fetch_image, process_vision_info
 
 
 def generate_template(description, model, processor, device):
@@ -41,3 +42,23 @@ def generate_template(description, model, processor, device):
         return parsed, None
     except (json.JSONDecodeError, IndexError) as e:
         return None, f"Could not parse generated template: {e}"
+
+
+def process_all_vision_info(messages, examples=None):
+    """Extract images from both ICL examples and user messages.
+
+    Returns a flat list of images in correct order (example images first,
+    then message images), or None if no images found.
+    """
+    all_images = []
+
+    if examples:
+        for ex in examples:
+            inp = ex.get("input")
+            if isinstance(inp, dict) and inp.get("type") == "image":
+                all_images.append(fetch_image(inp))
+
+    message_images = process_vision_info(messages)[0] or []
+    all_images.extend(message_images)
+
+    return all_images if all_images else None

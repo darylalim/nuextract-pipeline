@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 
@@ -77,3 +77,106 @@ def test_generate_template_model_error_propagates():
     model.generate.side_effect = RuntimeError("out of memory")
     with pytest.raises(RuntimeError, match="out of memory"):
         generate_template("extract name", model, processor, "cpu")
+
+
+# --- process_all_vision_info ---
+
+
+def test_process_all_vision_info_example_images_and_message_image():
+    from utils import process_all_vision_info
+
+    fake_example_img = MagicMock(name="example_img")
+    fake_message_img = MagicMock(name="message_img")
+
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image", "image": "https://example.com/input.png"}],
+        }
+    ]
+    examples = [
+        {
+            "input": {"type": "image", "image": "https://example.com/ex.png"},
+            "output": '{"name": "John"}',
+        }
+    ]
+
+    with (
+        patch(
+            "utils.process_vision_info",
+            return_value=([fake_message_img], None),
+        ),
+        patch("utils.fetch_image", return_value=fake_example_img),
+    ):
+        result = process_all_vision_info(messages, examples)
+
+    assert result == [fake_example_img, fake_message_img]
+
+
+def test_process_all_vision_info_no_images_returns_none():
+    from utils import process_all_vision_info
+
+    messages = [{"role": "user", "content": "just text"}]
+
+    with patch(
+        "utils.process_vision_info",
+        return_value=(None, None),
+    ):
+        result = process_all_vision_info(messages, None)
+
+    assert result is None
+
+
+def test_process_all_vision_info_text_examples_ignored():
+    from utils import process_all_vision_info
+
+    fake_message_img = MagicMock(name="message_img")
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image", "image": "https://example.com/input.png"}],
+        }
+    ]
+    examples = [
+        {"input": "just text", "output": '{"name": "John"}'},
+    ]
+
+    with patch(
+        "utils.process_vision_info",
+        return_value=([fake_message_img], None),
+    ):
+        result = process_all_vision_info(messages, examples)
+
+    assert result == [fake_message_img]
+
+
+def test_process_all_vision_info_mixed_examples():
+    from utils import process_all_vision_info
+
+    fake_example_img = MagicMock(name="example_img")
+    fake_message_img = MagicMock(name="message_img")
+
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image", "image": "https://example.com/input.png"}],
+        }
+    ]
+    examples = [
+        {"input": "just text", "output": '{"name": "Alice"}'},
+        {
+            "input": {"type": "image", "image": "https://example.com/ex.png"},
+            "output": '{"name": "Bob"}',
+        },
+    ]
+
+    with (
+        patch(
+            "utils.process_vision_info",
+            return_value=([fake_message_img], None),
+        ),
+        patch("utils.fetch_image", return_value=fake_example_img),
+    ):
+        result = process_all_vision_info(messages, examples)
+
+    assert result == [fake_example_img, fake_message_img]
