@@ -13,6 +13,8 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
+from utils import generate_template
+
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
 warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
 
@@ -184,14 +186,35 @@ def _has_config_errors(template_error, examples_error):
 
 st.title("Text Extraction Pipeline")
 
+device = get_device()
+
+with st.spinner(f"Loading {MODEL_ID} on {device.upper()}..."):
+    model, processor = load_model(device)
+
 with st.sidebar:
     st.header("Model")
     st.code(MODEL_ID, language=None)
     st.subheader("Template")
-    template_str = st.text_area("JSON template", value=DEFAULT_TEMPLATE, height=100)
+    if "template_input" not in st.session_state:
+        st.session_state["template_input"] = DEFAULT_TEMPLATE
+    template_str = st.text_area(
+        "JSON template or description",
+        height=100,
+        key="template_input",
+    )
     template_parsed, template_error = validate_template(template_str)
     if template_error:
         st.error(template_error)
+        if st.button("Generate Template", key="generate_template"):
+            with st.spinner("Generating template..."):
+                generated, gen_error = generate_template(
+                    template_str, model, processor, device
+                )
+            if generated is not None:
+                st.session_state["template_input"] = json.dumps(generated, indent=2)
+                st.rerun()
+            else:
+                st.error(f"Generation failed: {gen_error}")
     with st.expander("Supported types"):
         st.markdown(
             "- **verbatim-string** — extract text present verbatim in the input\n"
@@ -213,11 +236,6 @@ with st.sidebar:
     examples_parsed, examples_error = parse_examples(examples_str)
     if examples_error:
         st.error(examples_error)
-
-device = get_device()
-
-with st.spinner(f"Loading {MODEL_ID} on {device.upper()}..."):
-    model, processor = load_model(device)
 
 text_tab, image_tab, csv_tab = st.tabs(["Text", "Image", "CSV Batch"])
 
