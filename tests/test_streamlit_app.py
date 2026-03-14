@@ -148,6 +148,56 @@ def test_parse_examples_missing_keys(app):
     assert "output" in error.lower()
 
 
+def test_parse_examples_image_input_accepted(app):
+    examples_str = json.dumps([
+        {
+            "input": {"type": "image", "image": "https://example.com/img.png"},
+            "output": '{"name": "John"}',
+        }
+    ])
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is not None
+    assert error is None
+
+
+def test_parse_examples_image_input_missing_image_key(app):
+    examples_str = json.dumps([
+        {
+            "input": {"type": "image"},
+            "output": '{"name": "John"}',
+        }
+    ])
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is None
+    assert error is not None
+
+
+def test_parse_examples_image_input_non_http_url_rejected(app):
+    examples_str = json.dumps([
+        {
+            "input": {"type": "image", "image": "file:///etc/passwd"},
+            "output": '{"name": "John"}',
+        }
+    ])
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is None
+    assert error is not None
+
+
+def test_parse_examples_mixed_text_and_image_accepted(app):
+    examples_str = json.dumps([
+        {"input": "text example", "output": '{"name": "Alice"}'},
+        {
+            "input": {"type": "image", "image": "https://example.com/img.png"},
+            "output": '{"name": "Bob"}',
+        },
+    ])
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is not None
+    assert len(parsed) == 2
+    assert error is None
+
+
 # --- _has_config_errors ---
 
 

@@ -123,6 +123,15 @@ def parse_examples(examples_str):
     for i, ex in enumerate(parsed):
         if not isinstance(ex, dict) or "input" not in ex or "output" not in ex:
             return None, f'Example {i + 1} must have "input" and "output" keys.'
+        inp = ex["input"]
+        if isinstance(inp, dict):
+            if inp.get("type") != "image":
+                return None, f'Example {i + 1} input dict must have "type": "image".'
+            url = inp.get("image")
+            if not isinstance(url, str) or not url:
+                return None, f'Example {i + 1} must have a non-empty "image" URL.'
+            if not url.startswith(("http://", "https://")):
+                return None, f"Example {i + 1} image URL must use http:// or https://."
     return parsed, None
 
 
