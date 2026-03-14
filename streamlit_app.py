@@ -231,20 +231,23 @@ with text_tab:
                 st.warning("Enter some text.")
             else:
                 with st.spinner("Extracting..."):
-                    result = extract(
-                        input_text,
-                        model,
-                        processor,
-                        device,
-                        template_str,
-                        examples_parsed,
-                    )
-                if result is not None:
-                    st.json(result)
-                else:
-                    st.error(
-                        "Extraction failed — could not parse model output as JSON."
-                    )
+                    try:
+                        result = extract(
+                            input_text,
+                            model,
+                            processor,
+                            device,
+                            template_str,
+                            examples_parsed,
+                        )
+                        if result is not None:
+                            st.json(result)
+                        else:
+                            st.error(
+                                "Extraction failed — could not parse model output as JSON."
+                            )
+                    except ValueError as e:
+                        st.error(str(e))
 
 with image_tab:
     uploaded_image = st.file_uploader(
@@ -262,21 +265,24 @@ with image_tab:
                 st.warning("Upload an image.")
             else:
                 with st.spinner("Extracting..."):
-                    result = extract(
-                        image_context or None,
-                        model,
-                        processor,
-                        device,
-                        template_str,
-                        examples_parsed,
-                        image=pil_image,
-                    )
-                if result is not None:
-                    st.json(result)
-                else:
-                    st.error(
-                        "Extraction failed — could not parse model output as JSON."
-                    )
+                    try:
+                        result = extract(
+                            image_context or None,
+                            model,
+                            processor,
+                            device,
+                            template_str,
+                            examples_parsed,
+                            image=pil_image,
+                        )
+                        if result is not None:
+                            st.json(result)
+                        else:
+                            st.error(
+                                "Extraction failed — could not parse model output as JSON."
+                            )
+                    except ValueError as e:
+                        st.error(str(e))
 
 with csv_tab:
     uploaded_file = st.file_uploader(
@@ -300,15 +306,20 @@ with csv_tab:
                     progress_bar = st.progress(0, text="Starting...")
 
                     with st.spinner("Extracting..."):
+                        skipped_rows = []
                         for i, text in enumerate(df[selected_column].astype(str)):
-                            result = extract(
-                                text,
-                                model,
-                                processor,
-                                device,
-                                template_str,
-                                examples_parsed,
-                            )
+                            try:
+                                result = extract(
+                                    text,
+                                    model,
+                                    processor,
+                                    device,
+                                    template_str,
+                                    examples_parsed,
+                                )
+                            except ValueError:
+                                result = None
+                                skipped_rows.append(i + 1)
                             results.append(result)
                             progress_bar.progress(
                                 (i + 1) / len(df),
@@ -316,6 +327,8 @@ with csv_tab:
                             )
 
                     progress_bar.progress(1.0, text="Done.")
+                    if skipped_rows:
+                        st.warning(f"Rows skipped (input too long): {skipped_rows}")
 
                     fields = list(template_parsed.keys())
                     for field in fields:
