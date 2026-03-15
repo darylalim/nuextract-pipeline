@@ -36,6 +36,11 @@ Add batch vision processing to the NuExtract pipeline, enabling multi-image extr
 - Collects images in per-item order: all images for item 1 (examples then message), then all images for item 2, etc. This matches how the processor resolves image placeholder tokens per sequence when given `text=[formatted1, formatted2, ...]`
 - Raises `ValueError` if batched `examples` length doesn't match batched `messages` length
 
+**Return value:**
+- Returns a flat list of all images across all batch items, or `None` if no images were found in any item
+- For batch mode: if some items have images and others don't, only the items with images contribute to the list; the processor maps images to sequences via placeholder token counts in each formatted text
+- Returns `None` (not `[]`) when no images exist, consistent with current behavior and processor expectations (`images=None` vs `images=[]`)
+
 **Backward compatibility:**
 - Signature unchanged: `process_all_vision_info(messages, examples=None) -> list | None`
 - Single inputs produce identical output to current behavior
@@ -47,11 +52,17 @@ Add batch vision processing to the NuExtract pipeline, enabling multi-image extr
 extract_batch(
     inputs: list[dict],   # [{"text": str|None, "image": PIL|None, "context": str|None}, ...]
     model, processor, device,
-    template, examples,
+    template,             # JSON string (same format as current extract())
+    examples,
     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
     chunk_size=4,
+    progress_callback=None,  # Optional callable(completed: int, total: int)
 ) -> list[tuple[dict|None, bool]]
 ```
+
+- `template` is a JSON string passed directly to `apply_chat_template(template=...)`, same as current `extract()` behavior
+- `progress_callback` is called after each chunk completes with `(items_completed_so_far, total_items)` for UI progress updates
+- If `inputs` is empty, returns `[]` immediately
 
 **Processing:**
 - Splits `inputs` into chunks of `chunk_size`. Each chunk is processed as a true batched forward pass
@@ -69,10 +80,15 @@ extract_batch(
 **`extract()` wrapper:**
 ```python
 def extract(input_content, model, processor, device, template, examples, image=None, max_new_tokens=...):
-    batch_input = {"text": input_content, "image": image, "context": None}
+    if image is not None:
+        batch_input = {"text": None, "image": image, "context": input_content}
+    else:
+        batch_input = {"text": input_content, "image": None, "context": None}
     results = extract_batch([batch_input], model, processor, device, template, examples, max_new_tokens, chunk_size=1)
     return results[0]
 ```
+
+Note: when `image` is provided, `input_content` maps to `context` (the text alongside the image), not `text` (which would create a text-only message). This preserves the current `extract()` behavior where `input_content` + `image` produces a multimodal message.
 
 **Backward compatibility:** The wrapper preserves the existing `extract()` signature and behavior exactly. All 64 existing `extract()` tests must continue to pass with no changes. Using `chunk_size=1` ensures a batch-of-one behaves identically to the current single-item code path (no left-padding differences).
 
@@ -102,7 +118,7 @@ def extract(input_content, model, processor, device, template, examples, image=N
 ### 4. CSV tab image column extension
 
 **UI changes:**
-- New optional selectbox after text column selector: `"Select image column (optional)"` with options `["None"] + df.columns.tolist()`
+- New optional selectbox after text column selector: `"Select image column (optional)"` with options `["None"] + df.columns.tolist()`, excluding the already-selected text column to prevent selecting the same column for both
 - Batch size slider appears when image column is selected
 
 **Image loading:**
@@ -113,16 +129,15 @@ def extract(input_content, model, processor, device, template, examples, image=N
 **Template conversion:** Calls `_convert_template_if_needed()` before extraction, same as current behavior.
 
 **Processing:**
-- With image column: `{"text": text_value, "image": loaded_image, "context": None}` — text becomes context
+- With image column: `{"text": None, "image": loaded_image, "context": text_value}` — text column value becomes context alongside the image
 - Without image column: `{"text": text_value, "image": None, "context": None}` — identical to current behavior
 - Batched via `extract_batch()` with `chunk_size` from slider (chunking internal to `extract_batch()`). Progress updates per chunk
 
 ### 5. Batching strategy and memory management
 
 **Chunked batching:**
-- `extract_batch()` accepts a `chunk_size` parameter (default 4) and handles chunking internally
+- `extract_batch()` accepts `chunk_size` (default 4) and `progress_callback` parameters (see signature in Section 2)
 - Each chunk is a true batched forward pass via `model.generate()`
-- `extract_batch()` accepts an optional `progress_callback(completed, total)` for UI progress updates per chunk
 
 **Chunk size control:**
 - Image Batch tab: slider (1-8, default 4)
@@ -132,7 +147,7 @@ def extract(input_content, model, processor, device, template, examples, image=N
 - Processor must be configured with `padding_side="left"` for correct batched generation (already set in `load_model()`)
 
 **Error handling:**
-- OOM: detected by catching `RuntimeError` and checking for "out of memory" in the error message. On OOM for a chunk, fall back to sequential processing for that chunk's items. If a single item also OOMs, it is skipped with `(None, False)`
+- OOM: detected by catching `RuntimeError` and checking for "out of memory" in the error message. On OOM for a chunk, call `torch.cuda.empty_cache()` if on CUDA (no-op on other devices), then fall back to sequential processing for that chunk's items. If a single item also OOMs, it is skipped with `(None, False)`
 - Token limit (`ValueError`) items: skipped, marked as `(None, False)`, indices collected for a warning
 
 ## Testing Strategy
