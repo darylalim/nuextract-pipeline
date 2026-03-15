@@ -274,6 +274,148 @@ def test_process_all_vision_info_mixed_examples():
     assert result == [fake_example_img, fake_message_img]
 
 
+# --- process_all_vision_info batch support ---
+
+
+def test_process_all_vision_info_batch_two_items_with_examples():
+    from utils import process_all_vision_info
+
+    fake_ex_img1 = MagicMock(name="ex_img1")
+    fake_ex_img2 = MagicMock(name="ex_img2")
+    fake_msg_img1 = MagicMock(name="msg_img1")
+    fake_msg_img2 = MagicMock(name="msg_img2")
+
+    messages = [
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": "https://example.com/input1.png"}
+                ],
+            }
+        ],
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": "https://example.com/input2.png"}
+                ],
+            }
+        ],
+    ]
+    examples = [
+        [
+            {
+                "input": {"type": "image", "image": "https://example.com/ex1.png"},
+                "output": '{"name": "A"}',
+            }
+        ],
+        [
+            {
+                "input": {"type": "image", "image": "https://example.com/ex2.png"},
+                "output": '{"name": "B"}',
+            }
+        ],
+    ]
+
+    call_count = [0]
+    example_images = [fake_ex_img1, fake_ex_img2]
+
+    def mock_fetch_image(inp):
+        img = example_images[call_count[0]]
+        call_count[0] += 1
+        return img
+
+    msg_images = [[fake_msg_img1], [fake_msg_img2]]
+    pvi_call_count = [0]
+
+    def mock_process_vision_info(msgs):
+        imgs = msg_images[pvi_call_count[0]]
+        pvi_call_count[0] += 1
+        return (imgs, None)
+
+    with (
+        patch("utils.process_vision_info", side_effect=mock_process_vision_info),
+        patch("utils.fetch_image", side_effect=mock_fetch_image),
+    ):
+        result = process_all_vision_info(messages, examples)
+
+    assert result == [fake_ex_img1, fake_msg_img1, fake_ex_img2, fake_msg_img2]
+
+
+def test_process_all_vision_info_batch_single_examples_broadcast():
+    from utils import process_all_vision_info
+
+    fake_ex_img = MagicMock(name="ex_img")
+    fake_msg_img1 = MagicMock(name="msg_img1")
+    fake_msg_img2 = MagicMock(name="msg_img2")
+
+    messages = [
+        [{"role": "user", "content": [{"type": "image", "image": "https://example.com/1.png"}]}],
+        [{"role": "user", "content": [{"type": "image", "image": "https://example.com/2.png"}]}],
+    ]
+    examples = [
+        {
+            "input": {"type": "image", "image": "https://example.com/ex.png"},
+            "output": '{"name": "A"}',
+        }
+    ]
+
+    msg_images = [[fake_msg_img1], [fake_msg_img2]]
+    pvi_call_count = [0]
+
+    def mock_process_vision_info(msgs):
+        imgs = msg_images[pvi_call_count[0]]
+        pvi_call_count[0] += 1
+        return (imgs, None)
+
+    with (
+        patch("utils.process_vision_info", side_effect=mock_process_vision_info),
+        patch("utils.fetch_image", return_value=fake_ex_img),
+    ):
+        result = process_all_vision_info(messages, examples)
+
+    # Single examples list is broadcast to each batch item
+    assert result == [fake_ex_img, fake_msg_img1, fake_ex_img, fake_msg_img2]
+
+
+def test_process_all_vision_info_batch_mismatched_lengths():
+    from utils import process_all_vision_info
+
+    messages = [
+        [{"role": "user", "content": "text1"}],
+        [{"role": "user", "content": "text2"}],
+    ]
+    examples = [
+        [{"input": "ex1", "output": "out1"}],
+        [{"input": "ex2", "output": "out2"}],
+        [{"input": "ex3", "output": "out3"}],
+    ]
+
+    with pytest.raises(ValueError, match="length"):
+        process_all_vision_info(messages, examples)
+
+
+def test_process_all_vision_info_single_input_backward_compat():
+    from utils import process_all_vision_info
+
+    fake_message_img = MagicMock(name="message_img")
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image", "image": "https://example.com/input.png"}],
+        }
+    ]
+
+    with patch(
+        "utils.process_vision_info",
+        return_value=([fake_message_img], None),
+    ):
+        result = process_all_vision_info(messages)
+
+    assert result == [fake_message_img]
+
+
 # --- detect_and_convert_template ---
 
 

@@ -156,18 +156,41 @@ def generate_template(description, model, processor, device):
 def process_all_vision_info(messages, examples=None):
     """Extract images from both ICL examples and user messages.
 
-    Returns a flat list of images in correct order (example images first,
-    then message images), or None if no images found.
+    Supports single input (messages is a list of dicts) or batch input
+    (messages is a list of lists of dicts). Returns a flat list of images
+    in per-item order (example images then message images for each item),
+    or None if no images found.
     """
+    # Detect single vs batch: single messages is [{"role": ...}, ...],
+    # batch is [[{"role": ...}, ...], ...]
+    is_batch = messages and isinstance(messages[0], list)
+    messages_batch = messages if is_batch else [messages]
+
+    # Normalize examples
+    if examples is None:
+        examples_batch = [None] * len(messages_batch)
+    elif isinstance(examples, list) and examples and isinstance(examples[0], list):
+        # Batched examples: [[ex1, ex2], [ex3, ex4]]
+        examples_batch = examples
+    else:
+        # Single examples list: broadcast to each batch item
+        examples_batch = [examples] * len(messages_batch)
+
+    if len(examples_batch) != len(messages_batch):
+        raise ValueError(
+            f"Examples batch length ({len(examples_batch)}) must match "
+            f"messages batch length ({len(messages_batch)})."
+        )
+
     all_images = []
+    for msg_group, ex_group in zip(messages_batch, examples_batch):
+        if ex_group:
+            for ex in ex_group:
+                inp = ex.get("input")
+                if isinstance(inp, dict) and inp.get("type") == "image":
+                    all_images.append(fetch_image(inp))
 
-    if examples:
-        for ex in examples:
-            inp = ex.get("input")
-            if isinstance(inp, dict) and inp.get("type") == "image":
-                all_images.append(fetch_image(inp))
-
-    message_images = process_vision_info(messages)[0] or []
-    all_images.extend(message_images)
+        message_images = process_vision_info(msg_group)[0] or []
+        all_images.extend(message_images)
 
     return all_images if all_images else None
