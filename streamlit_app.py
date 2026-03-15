@@ -133,7 +133,16 @@ def parse_examples(examples_str):
     return parsed, None
 
 
-def extract(input_content, model, processor, device, template, examples, image=None, max_new_tokens=DEFAULT_MAX_NEW_TOKENS):
+def extract(
+    input_content,
+    model,
+    processor,
+    device,
+    template,
+    examples,
+    image=None,
+    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+):
     if image is not None:
         content = [{"type": "image", "image": image}]
         if input_content:
@@ -202,6 +211,15 @@ with st.spinner(f"Loading {MODEL_ID} on {device.upper()}..."):
 with st.sidebar:
     st.header("Model")
     st.code(MODEL_ID, language=None)
+    st.subheader("Generation")
+    max_new_tokens = st.slider(
+        "Max new tokens",
+        min_value=64,
+        max_value=4096,
+        value=DEFAULT_MAX_NEW_TOKENS,
+        step=64,
+        help="Maximum tokens to generate. Increase for complex templates.",
+    )
     st.subheader("Template")
     if "template_input" not in st.session_state:
         st.session_state["template_input"] = DEFAULT_TEMPLATE
@@ -265,7 +283,12 @@ with text_tab:
                             device,
                             template_str,
                             examples_parsed,
+                            max_new_tokens=max_new_tokens,
                         )
+                        if was_truncated:
+                            st.warning(
+                                "Output may be truncated — consider increasing max tokens."
+                            )
                         if result is not None:
                             st.json(result)
                         else:
@@ -274,6 +297,8 @@ with text_tab:
                             )
                     except ValueError as e:
                         st.error(str(e))
+                    except RuntimeError as e:
+                        st.error(f"Runtime error: {e}. Try reducing max tokens.")
 
 with image_tab:
     uploaded_image = st.file_uploader(
@@ -300,7 +325,12 @@ with image_tab:
                             template_str,
                             examples_parsed,
                             image=pil_image,
+                            max_new_tokens=max_new_tokens,
                         )
+                        if was_truncated:
+                            st.warning(
+                                "Output may be truncated — consider increasing max tokens."
+                            )
                         if result is not None:
                             st.json(result)
                         else:
@@ -309,6 +339,8 @@ with image_tab:
                             )
                     except ValueError as e:
                         st.error(str(e))
+                    except RuntimeError as e:
+                        st.error(f"Runtime error: {e}. Try reducing max tokens.")
 
 with csv_tab:
     uploaded_file = st.file_uploader(
@@ -333,17 +365,21 @@ with csv_tab:
 
                     with st.spinner("Extracting..."):
                         skipped_rows = []
+                        truncated_rows = []
                         for i, text in enumerate(df[selected_column].astype(str)):
                             try:
-                                result, _was_truncated = extract(
+                                result, was_truncated = extract(
                                     text,
                                     model,
                                     processor,
                                     device,
                                     template_str,
                                     examples_parsed,
+                                    max_new_tokens=max_new_tokens,
                                 )
-                            except ValueError:
+                                if was_truncated:
+                                    truncated_rows.append(i + 1)
+                            except (ValueError, RuntimeError):
                                 result = None
                                 skipped_rows.append(i + 1)
                             results.append(result)
@@ -355,6 +391,8 @@ with csv_tab:
                     progress_bar.progress(1.0, text="Done.")
                     if skipped_rows:
                         st.warning(f"Rows skipped (input too long): {skipped_rows}")
+                    if truncated_rows:
+                        st.warning(f"Rows possibly truncated: {truncated_rows}")
 
                     fields = list(template_parsed.keys())
                     for field in fields:
