@@ -12,7 +12,12 @@ import torch
 from PIL import Image
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
-from utils import DEFAULT_MAX_NEW_TOKENS, generate_template, process_all_vision_info
+from utils import (
+    DEFAULT_MAX_NEW_TOKENS,
+    detect_and_convert_template,
+    generate_template,
+    process_all_vision_info,
+)
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
 warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
@@ -189,14 +194,25 @@ def extract(
         return None, was_truncated
 
 
-def _has_config_errors(template_error, examples_error):
+def _has_config_errors(template_error, examples_error, template_parsed):
     if template_error:
         st.error(f"Fix template: {template_error}")
+        return True
+    if template_parsed is None:
+        st.error("Generate a JSON template first.")
         return True
     if examples_error:
         st.error(f"Fix examples: {examples_error}")
         return True
     return False
+
+
+def _convert_template_if_needed(json_str, source_format):
+    """Convert non-JSON template to JSON and update the template field."""
+    if source_format in ("yaml", "pydantic", "pydantic_with_unknown"):
+        st.session_state["template_input"] = json_str
+        return json_str
+    return None
 
 
 # --- Streamlit UI ---
@@ -228,9 +244,23 @@ with st.sidebar:
         height=100,
         key="template_input",
     )
-    template_parsed, template_error = validate_template(template_str)
-    if template_error:
+    json_str, source_format, template_error = detect_and_convert_template(template_str)
+    if source_format == "json":
+        template_parsed, _ = validate_template(template_str)
+    elif source_format in ("yaml", "pydantic", "pydantic_with_unknown"):
+        fmt_label = "pydantic" if "pydantic" in source_format else source_format
+        st.info(f"Detected {fmt_label} template — will convert to JSON on extract.")
+        if source_format == "pydantic_with_unknown":
+            st.warning(
+                "Nested models simplified to string; edit the JSON template to add structure."
+            )
+        template_parsed, _ = validate_template(json_str)
+    elif template_error:
         st.error(template_error)
+        template_parsed = None
+    else:
+        st.info("Template will be used as a natural language description.")
+        template_parsed = None
         if st.button("Generate Template", key="generate_template"):
             with st.spinner("Generating template..."):
                 generated, gen_error = generate_template(
@@ -270,12 +300,15 @@ with text_tab:
         "Enter text to extract from", height=150, key="text_input"
     )
     if st.button("Extract", type="primary", key="text_extract"):
-        if not _has_config_errors(template_error, examples_error):
+        if not _has_config_errors(template_error, examples_error, template_parsed):
             if not input_text.strip():
                 st.warning("Enter some text.")
             else:
                 with st.spinner("Extracting..."):
                     try:
+                        converted = _convert_template_if_needed(json_str, source_format)
+                        if converted:
+                            template_str = converted
                         result, was_truncated = extract(
                             input_text,
                             model,
@@ -311,12 +344,15 @@ with image_tab:
         pil_image = Image.open(uploaded_image)
         st.image(pil_image, width="stretch")
     if st.button("Extract", type="primary", key="image_extract"):
-        if not _has_config_errors(template_error, examples_error):
+        if not _has_config_errors(template_error, examples_error, template_parsed):
             if uploaded_image is None:
                 st.warning("Upload an image.")
             else:
                 with st.spinner("Extracting..."):
                     try:
+                        converted = _convert_template_if_needed(json_str, source_format)
+                        if converted:
+                            template_str = converted
                         result, was_truncated = extract(
                             image_context or None,
                             model,
@@ -359,11 +395,16 @@ with csv_tab:
             )
 
             if st.button("Extract", type="primary", key="csv_extract"):
-                if not _has_config_errors(template_error, examples_error):
+                if not _has_config_errors(
+                    template_error, examples_error, template_parsed
+                ):
                     results = []
                     progress_bar = st.progress(0, text="Starting...")
 
                     with st.spinner("Extracting..."):
+                        converted = _convert_template_if_needed(json_str, source_format)
+                        if converted:
+                            template_str = converted
                         skipped_rows = []
                         truncated_rows = []
                         for i, text in enumerate(df[selected_column].astype(str)):

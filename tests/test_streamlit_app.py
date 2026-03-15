@@ -257,26 +257,32 @@ def test_parse_examples_mixed_text_and_image_accepted(app):
 
 def test_has_config_errors_template_error(app):
     with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors("bad json", None) is True
+        assert app._has_config_errors("bad json", None, None) is True
         mock_st.error.assert_called_once_with("Fix template: bad json")
 
 
 def test_has_config_errors_examples_error(app):
     with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors(None, "missing keys") is True
+        assert app._has_config_errors(None, "missing keys", {"a": "b"}) is True
         mock_st.error.assert_called_once_with("Fix examples: missing keys")
 
 
 def test_has_config_errors_no_errors(app):
     with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors(None, None) is False
+        assert app._has_config_errors(None, None, {"a": "b"}) is False
         mock_st.error.assert_not_called()
 
 
 def test_has_config_errors_template_takes_priority(app):
     with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors("bad template", "bad examples") is True
+        assert app._has_config_errors("bad template", "bad examples", None) is True
         mock_st.error.assert_called_once_with("Fix template: bad template")
+
+
+def test_has_config_errors_no_template_parsed(app):
+    with patch("streamlit_app.st") as mock_st:
+        assert app._has_config_errors(None, None, None) is True
+        mock_st.error.assert_called_once_with("Generate a JSON template first.")
 
 
 # --- extract ---
@@ -467,7 +473,12 @@ def test_extract_uses_custom_max_new_tokens(app):
     output = json.dumps({"company": "Acme"})
     model, processor = make_mocks(output)
     app.extract(
-        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES,
+        "some text",
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
         max_new_tokens=512,
     )
     gen_call = model.generate.call_args
@@ -491,7 +502,12 @@ def test_extract_detects_truncation(app):
     # make_mocks generates output tensor of shape (1, 8), input_ids shape (1, 5)
     # trimmed = 3 tokens. Set max_new_tokens=3 to trigger truncation.
     _, was_truncated = app.extract(
-        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES,
+        "some text",
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
         max_new_tokens=3,
     )
     assert was_truncated is True
@@ -502,7 +518,12 @@ def test_extract_no_truncation_when_output_shorter(app):
     model, processor = make_mocks(output)
     # trimmed = 3 tokens, max_new_tokens=100 → no truncation
     _, was_truncated = app.extract(
-        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES,
+        "some text",
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
         max_new_tokens=100,
     )
     assert was_truncated is False
