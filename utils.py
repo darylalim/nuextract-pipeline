@@ -1,9 +1,45 @@
 import json
 
 import torch
+import yaml
 from qwen_vl_utils import fetch_image, process_vision_info
 
 DEFAULT_MAX_NEW_TOKENS = 2048
+
+
+def detect_and_convert_template(template_str):
+    """Detect template format and convert to JSON.
+
+    Returns (json_str, source_format, error) where source_format is
+    "json", "yaml", "pydantic", "pydantic_with_unknown", or None.
+    """
+    if not template_str or not template_str.strip():
+        return None, None, "Template must not be empty."
+
+    # 1. Try JSON
+    try:
+        parsed = json.loads(template_str)
+        if isinstance(parsed, dict):
+            if not parsed:
+                return None, None, "Template must not be empty."
+            return template_str.strip(), "json", None
+        else:
+            return None, None, "Template must be a JSON object."
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Try YAML
+    try:
+        parsed = yaml.safe_load(template_str)
+        if isinstance(parsed, dict) and parsed:
+            return json.dumps(parsed, indent=2), "yaml", None
+    except yaml.YAMLError:
+        pass
+
+    # 3. Try Pydantic (implemented in Task 6)
+
+    # No format matched — treat as natural language
+    return None, None, None
 
 
 def generate_template(description, model, processor, device):

@@ -272,3 +272,95 @@ def test_process_all_vision_info_mixed_examples():
         result = process_all_vision_info(messages, examples)
 
     assert result == [fake_example_img, fake_message_img]
+
+
+# --- detect_and_convert_template ---
+
+
+def test_detect_json_valid():
+    from utils import detect_and_convert_template
+
+    json_str, fmt, error = detect_and_convert_template('{"name": "string"}')
+    assert fmt == "json"
+    assert json.loads(json_str) == {"name": "string"}
+    assert error is None
+
+
+def test_detect_json_empty_object():
+    from utils import detect_and_convert_template
+
+    json_str, fmt, error = detect_and_convert_template("{}")
+    assert json_str is None
+    assert fmt is None
+    assert error is not None
+    assert "empty" in error.lower()
+
+
+def test_detect_json_non_dict():
+    from utils import detect_and_convert_template
+
+    json_str, fmt, error = detect_and_convert_template("[1, 2, 3]")
+    assert json_str is None
+    assert fmt is None
+    assert error is not None
+    assert "object" in error.lower()
+
+
+def test_detect_empty_string():
+    from utils import detect_and_convert_template
+
+    json_str, fmt, error = detect_and_convert_template("")
+    assert json_str is None
+    assert fmt is None
+    assert error is not None
+    assert "empty" in error.lower()
+
+
+def test_detect_whitespace_only():
+    from utils import detect_and_convert_template
+
+    json_str, fmt, error = detect_and_convert_template("   ")
+    assert json_str is None
+    assert fmt is None
+    assert error is not None
+    assert "empty" in error.lower()
+
+
+def test_detect_yaml_valid():
+    from utils import detect_and_convert_template
+
+    yaml_input = "name: string\nage: integer\n"
+    json_str, fmt, error = detect_and_convert_template(yaml_input)
+    assert fmt == "yaml"
+    assert json.loads(json_str) == {"name": "string", "age": "integer"}
+    assert error is None
+
+
+def test_detect_yaml_nested():
+    from utils import detect_and_convert_template
+
+    yaml_input = "person:\n  name: verbatim-string\n  age: integer\n"
+    json_str, fmt, error = detect_and_convert_template(yaml_input)
+    assert fmt == "yaml"
+    parsed = json.loads(json_str)
+    assert parsed == {"person": {"name": "verbatim-string", "age": "integer"}}
+
+
+def test_detect_yaml_not_dict():
+    from utils import detect_and_convert_template
+
+    yaml_input = "- item1\n- item2\n"
+    json_str, fmt, error = detect_and_convert_template(yaml_input)
+    assert json_str is None
+    assert fmt is None
+    assert error is None
+
+
+def test_detect_yaml_invalid():
+    from utils import detect_and_convert_template
+
+    yaml_input = "{{{\ninvalid: yaml: content: [["
+    json_str, fmt, error = detect_and_convert_template(yaml_input)
+    assert json_str is None
+    assert fmt is None
+    assert error is None
