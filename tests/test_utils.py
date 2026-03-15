@@ -364,3 +364,107 @@ def test_detect_yaml_invalid():
     assert json_str is None
     assert fmt is None
     assert error is None
+
+
+def test_detect_pydantic_flat_model():
+    from utils import detect_and_convert_template
+
+    pydantic_input = (
+        "class Person(BaseModel):\n"
+        "    name: str\n"
+        "    age: int\n"
+        "    salary: float\n"
+        "    active: bool\n"
+    )
+    json_str, fmt, error = detect_and_convert_template(pydantic_input)
+    assert fmt == "pydantic"
+    parsed = json.loads(json_str)
+    assert parsed == {
+        "name": "string",
+        "age": "integer",
+        "salary": "number",
+        "active": "boolean",
+    }
+    assert error is None
+
+
+def test_detect_pydantic_list_type():
+    from utils import detect_and_convert_template
+
+    pydantic_input = (
+        "class Job(BaseModel):\n"
+        "    title: str\n"
+        "    skills: list[str]\n"
+    )
+    json_str, fmt, error = detect_and_convert_template(pydantic_input)
+    assert fmt == "pydantic"
+    parsed = json.loads(json_str)
+    assert parsed == {"title": "string", "skills": ["string"]}
+
+
+def test_detect_pydantic_optional_type():
+    from utils import detect_and_convert_template
+
+    pydantic_input = (
+        "class Item(BaseModel):\n"
+        "    name: str\n"
+        "    description: Optional[str]\n"
+    )
+    json_str, fmt, error = detect_and_convert_template(pydantic_input)
+    assert fmt == "pydantic"
+    parsed = json.loads(json_str)
+    assert parsed == {"name": "string", "description": "string"}
+
+
+def test_detect_pydantic_datetime_type():
+    from utils import detect_and_convert_template
+
+    pydantic_input = (
+        "class Event(BaseModel):\n"
+        "    name: str\n"
+        "    date: datetime\n"
+    )
+    json_str, fmt, error = detect_and_convert_template(pydantic_input)
+    assert fmt == "pydantic"
+    parsed = json.loads(json_str)
+    assert parsed == {"name": "string", "date": "date-time"}
+
+
+def test_detect_pydantic_nested_model_falls_back_to_string():
+    from utils import detect_and_convert_template
+
+    pydantic_input = (
+        "class Address(BaseModel):\n"
+        "    street: str\n"
+        "\n"
+        "class Person(BaseModel):\n"
+        "    name: str\n"
+        "    address: Address\n"
+    )
+    json_str, fmt, error = detect_and_convert_template(pydantic_input)
+    assert fmt == "pydantic_with_unknown"
+    parsed = json.loads(json_str)
+    assert parsed == {"name": "string", "address": "string"}
+
+
+def test_detect_pydantic_nested_list_falls_back():
+    from utils import detect_and_convert_template
+
+    pydantic_input = (
+        "class Item(BaseModel):\n"
+        "    tags: list[list[str]]\n"
+    )
+    json_str, fmt, error = detect_and_convert_template(pydantic_input)
+    assert fmt == "pydantic"
+    parsed = json.loads(json_str)
+    assert parsed == {"tags": ["string"]}
+
+
+def test_detect_natural_language_fallthrough():
+    from utils import detect_and_convert_template
+
+    text = "Extract the person's name and age from the text"
+    json_str, fmt, error = detect_and_convert_template(text)
+    assert json_str is None
+    assert fmt is None
+    assert error is None
