@@ -482,6 +482,32 @@ def test_extract_default_max_new_tokens_is_2048(app):
     assert gen_call[1]["max_new_tokens"] == 2048
 
 
+# --- truncation detection ---
+
+
+def test_extract_detects_truncation(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_mocks(output)
+    # make_mocks generates output tensor of shape (1, 8), input_ids shape (1, 5)
+    # trimmed = 3 tokens. Set max_new_tokens=3 to trigger truncation.
+    _, was_truncated = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES,
+        max_new_tokens=3,
+    )
+    assert was_truncated is True
+
+
+def test_extract_no_truncation_when_output_shorter(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_mocks(output)
+    # trimmed = 3 tokens, max_new_tokens=100 → no truncation
+    _, was_truncated = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES,
+        max_new_tokens=100,
+    )
+    assert was_truncated is False
+
+
 # --- extract with image examples ---
 
 
