@@ -391,11 +391,7 @@ def test_detect_pydantic_flat_model():
 def test_detect_pydantic_list_type():
     from utils import detect_and_convert_template
 
-    pydantic_input = (
-        "class Job(BaseModel):\n"
-        "    title: str\n"
-        "    skills: list[str]\n"
-    )
+    pydantic_input = "class Job(BaseModel):\n    title: str\n    skills: list[str]\n"
     json_str, fmt, error = detect_and_convert_template(pydantic_input)
     assert fmt == "pydantic"
     parsed = json.loads(json_str)
@@ -406,9 +402,7 @@ def test_detect_pydantic_optional_type():
     from utils import detect_and_convert_template
 
     pydantic_input = (
-        "class Item(BaseModel):\n"
-        "    name: str\n"
-        "    description: Optional[str]\n"
+        "class Item(BaseModel):\n    name: str\n    description: Optional[str]\n"
     )
     json_str, fmt, error = detect_and_convert_template(pydantic_input)
     assert fmt == "pydantic"
@@ -419,11 +413,7 @@ def test_detect_pydantic_optional_type():
 def test_detect_pydantic_datetime_type():
     from utils import detect_and_convert_template
 
-    pydantic_input = (
-        "class Event(BaseModel):\n"
-        "    name: str\n"
-        "    date: datetime\n"
-    )
+    pydantic_input = "class Event(BaseModel):\n    name: str\n    date: datetime\n"
     json_str, fmt, error = detect_and_convert_template(pydantic_input)
     assert fmt == "pydantic"
     parsed = json.loads(json_str)
@@ -450,10 +440,7 @@ def test_detect_pydantic_nested_model_falls_back_to_string():
 def test_detect_pydantic_nested_list_falls_back():
     from utils import detect_and_convert_template
 
-    pydantic_input = (
-        "class Item(BaseModel):\n"
-        "    tags: list[list[str]]\n"
-    )
+    pydantic_input = "class Item(BaseModel):\n    tags: list[list[str]]\n"
     json_str, fmt, error = detect_and_convert_template(pydantic_input)
     assert fmt == "pydantic"
     parsed = json.loads(json_str)

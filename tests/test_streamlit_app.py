@@ -92,6 +92,10 @@ def test_max_input_tokens_constant(app):
     assert app.MAX_INPUT_TOKENS == 10_000
 
 
+def test_default_max_new_tokens_constant(app):
+    assert app.DEFAULT_MAX_NEW_TOKENS == 2048
+
+
 # --- validate_template ---
 
 
@@ -284,6 +288,45 @@ def test_has_config_errors_no_template_parsed(app):
     with patch("streamlit_app.st") as mock_st:
         assert app._has_config_errors(None, None, None) is True
         mock_st.error.assert_called_once_with("Generate a JSON template first.")
+
+
+# --- _convert_template_if_needed ---
+
+
+def test_convert_template_yaml(app):
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.session_state = {}
+        result = app._convert_template_if_needed('{"name": "string"}', "yaml")
+        assert result == '{"name": "string"}'
+        assert mock_st.session_state["template_input"] == '{"name": "string"}'
+
+
+def test_convert_template_pydantic(app):
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.session_state = {}
+        result = app._convert_template_if_needed('{"name": "string"}', "pydantic")
+        assert result == '{"name": "string"}'
+        assert mock_st.session_state["template_input"] == '{"name": "string"}'
+
+
+def test_convert_template_pydantic_with_unknown(app):
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.session_state = {}
+        result = app._convert_template_if_needed(
+            '{"name": "string"}', "pydantic_with_unknown"
+        )
+        assert result == '{"name": "string"}'
+        assert mock_st.session_state["template_input"] == '{"name": "string"}'
+
+
+def test_convert_template_json_returns_none(app):
+    result = app._convert_template_if_needed('{"name": "string"}', "json")
+    assert result is None
+
+
+def test_convert_template_none_format_returns_none(app):
+    result = app._convert_template_if_needed(None, None)
+    assert result is None
 
 
 # --- extract ---
@@ -530,6 +573,22 @@ def test_extract_no_truncation_when_output_shorter(app):
     assert was_truncated is False
 
 
+def test_extract_truncation_with_json_failure(app):
+    model, processor = make_mocks("not valid json {{{")
+    # trimmed = 3 tokens, max_new_tokens=3 → truncated AND json fails
+    result, was_truncated = app.extract(
+        "some text",
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
+        max_new_tokens=3,
+    )
+    assert result is None
+    assert was_truncated is True
+
+
 # --- extract with image examples ---
 
 
@@ -725,3 +784,15 @@ def test_load_presets_empty_list(app, tmp_path):
     result = app.load_presets(str(f))
     assert len(result) == 1
     assert result[0]["name"] == "Person"
+
+
+def test_load_presets_actual_file(app):
+    presets_path = str(Path(__file__).resolve().parent.parent / "presets.json")
+    result = app.load_presets(presets_path)
+    assert len(result) == 5
+    names = {p["name"] for p in result}
+    assert names == {"Person", "Job Posting", "Invoice", "Product", "Scientific Paper"}
+    for p in result:
+        assert isinstance(p["template"], dict) and p["template"]
+        assert isinstance(p["examples"], list)
+        assert isinstance(p["sample_text"], str)
