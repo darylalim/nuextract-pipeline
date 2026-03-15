@@ -117,6 +117,16 @@ def test_generate_template_decodes_only_new_tokens():
     assert torch.equal(decoded_tensor, expected_trimmed)
 
 
+def test_generate_template_uses_256_max_new_tokens():
+    from utils import generate_template
+
+    output = json.dumps({"name": "string"})
+    model, processor = make_mocks(output)
+    generate_template("extract name", model, processor, "cpu")
+    gen_call = model.generate.call_args
+    assert gen_call[1]["max_new_tokens"] == 256
+
+
 # --- process_all_vision_info ---
 
 

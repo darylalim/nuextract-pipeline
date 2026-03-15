@@ -285,7 +285,7 @@ def test_has_config_errors_template_takes_priority(app):
 def test_extract_returns_parsed_dict(app):
     output = json.dumps({"company": "Acme", "revenue": "$1B"})
     model, processor = make_mocks(output)
-    result = app.extract(
+    result, _ = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
     assert result == {"company": "Acme", "revenue": "$1B"}
@@ -293,7 +293,7 @@ def test_extract_returns_parsed_dict(app):
 
 def test_extract_json_failure_returns_none(app):
     model, processor = make_mocks("not valid json {{{")
-    result = app.extract(
+    result, _ = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
     assert result is None
@@ -302,7 +302,7 @@ def test_extract_json_failure_returns_none(app):
 def test_extract_empty_values_returns_dict(app):
     output = json.dumps({"company": "", "revenue": ""})
     model, processor = make_mocks(output)
-    result = app.extract(
+    result, _ = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
     assert result == {"company": "", "revenue": ""}
@@ -457,10 +457,29 @@ def test_extract_at_token_limit_succeeds(app):
     model.generate.return_value = torch.cat(
         [exact_input_ids, torch.tensor([[10, 20, 30]])], dim=1
     )
-    result = app.extract(
+    result, _ = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
     assert result == {"company": "Acme"}
+
+
+def test_extract_uses_custom_max_new_tokens(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_mocks(output)
+    app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES,
+        max_new_tokens=512,
+    )
+    gen_call = model.generate.call_args
+    assert gen_call[1]["max_new_tokens"] == 512
+
+
+def test_extract_default_max_new_tokens_is_2048(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_mocks(output)
+    app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+    gen_call = model.generate.call_args
+    assert gen_call[1]["max_new_tokens"] == 2048
 
 
 # --- extract with image examples ---

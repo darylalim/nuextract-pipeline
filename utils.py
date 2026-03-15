@@ -3,7 +3,7 @@ import json
 import torch
 from qwen_vl_utils import fetch_image, process_vision_info
 
-MAX_NEW_TOKENS = 256
+DEFAULT_MAX_NEW_TOKENS = 2048
 
 
 def generate_template(description, model, processor, device):
@@ -31,7 +31,7 @@ def generate_template(description, model, processor, device):
             **inputs,
             do_sample=False,
             num_beams=1,
-            max_new_tokens=MAX_NEW_TOKENS,
+            max_new_tokens=256,
         )
 
     trimmed = output[:, input_len:]

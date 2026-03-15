@@ -12,7 +12,7 @@ import torch
 from PIL import Image
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
-from utils import MAX_NEW_TOKENS, generate_template, process_all_vision_info
+from utils import DEFAULT_MAX_NEW_TOKENS, generate_template, process_all_vision_info
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
 warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
@@ -133,7 +133,7 @@ def parse_examples(examples_str):
     return parsed, None
 
 
-def extract(input_content, model, processor, device, template, examples, image=None):
+def extract(input_content, model, processor, device, template, examples, image=None, max_new_tokens=DEFAULT_MAX_NEW_TOKENS):
     if image is not None:
         content = [{"type": "image", "image": image}]
         if input_content:
@@ -165,18 +165,19 @@ def extract(input_content, model, processor, device, template, examples, image=N
             **inputs,
             do_sample=False,
             num_beams=1,
-            max_new_tokens=MAX_NEW_TOKENS,
+            max_new_tokens=max_new_tokens,
         )
 
     trimmed = output[:, input_len:]
+    was_truncated = trimmed.shape[1] == max_new_tokens
     decoded = processor.batch_decode(
         trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
     )
 
     try:
-        return json.loads(decoded[0])
+        return json.loads(decoded[0]), was_truncated
     except (json.JSONDecodeError, IndexError):
-        return None
+        return None, was_truncated
 
 
 def _has_config_errors(template_error, examples_error):
@@ -257,7 +258,7 @@ with text_tab:
             else:
                 with st.spinner("Extracting..."):
                     try:
-                        result = extract(
+                        result, was_truncated = extract(
                             input_text,
                             model,
                             processor,
@@ -291,7 +292,7 @@ with image_tab:
             else:
                 with st.spinner("Extracting..."):
                     try:
-                        result = extract(
+                        result, was_truncated = extract(
                             image_context or None,
                             model,
                             processor,
@@ -334,7 +335,7 @@ with csv_tab:
                         skipped_rows = []
                         for i, text in enumerate(df[selected_column].astype(str)):
                             try:
-                                result = extract(
+                                result, _was_truncated = extract(
                                     text,
                                     model,
                                     processor,
