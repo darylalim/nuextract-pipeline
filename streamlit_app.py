@@ -239,6 +239,79 @@ def _clear_device_cache(device):
         torch.mps.empty_cache()
 
 
+def _run_single_extraction(
+    input_content,
+    model,
+    processor,
+    device,
+    template_str,
+    examples,
+    image=None,
+    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+):
+    """Run single extraction and display results with error handling."""
+    try:
+        result, was_truncated = extract(
+            input_content,
+            model,
+            processor,
+            device,
+            template_str,
+            examples,
+            image=image,
+            max_new_tokens=max_new_tokens,
+        )
+        if was_truncated:
+            st.warning("Output may be truncated — consider increasing max tokens.")
+        if result is not None:
+            st.json(result)
+        else:
+            st.error("Extraction failed — could not parse model output as JSON.")
+    except ValueError as e:
+        st.error(str(e))
+    except RuntimeError as e:
+        st.error(f"Runtime error: {e}. Try reducing max tokens.")
+
+
+def _display_csv_results(
+    df,
+    results,
+    skipped_rows,
+    truncated_rows,
+    template_parsed,
+    selected_column,
+    filename,
+):
+    """Display CSV extraction results with preview, metrics, and download."""
+    if skipped_rows:
+        st.warning(f"Rows skipped (input too long): {skipped_rows}")
+    if truncated_rows:
+        st.warning(f"Rows possibly truncated: {truncated_rows}")
+
+    fields = list(template_parsed.keys())
+    for field in fields:
+        df[field] = [r.get(field, "") if r is not None else "" for r in results]
+
+    st.write("Preview")
+    st.dataframe(df[[selected_column] + fields].head(), width="stretch")
+
+    total = len(df)
+    failed = sum(1 for r in results if r is None)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Rows", total)
+    col2.metric("Extracted", total - failed)
+    col3.metric("Failed", failed)
+
+    base_name = filename.rsplit(".", 1)[0]
+    st.download_button(
+        label="Download",
+        data=df.to_csv(index=False),
+        file_name=f"{base_name}_extract.csv",
+        mime="text/csv",
+    )
+
+
 def _load_csv_image(value):
     """Load an image from a URL or file path. Returns PIL Image or None."""
     if not value or not str(value).strip():
@@ -303,13 +376,38 @@ def _build_message(item):
     return [{"role": "user", "content": item["text"]}]
 
 
+def _sequential_fallback(
+    all_messages, formatted_texts, model, processor, device, examples, max_new_tokens
+):
+    """Retry each item individually after a batch failure."""
+    results = [(None, False)] * len(all_messages)
+    for i, (messages, formatted) in enumerate(zip(all_messages, formatted_texts)):
+        try:
+            results[i] = _run_batch_inference(
+                [messages],
+                [formatted],
+                model,
+                processor,
+                device,
+                examples,
+                max_new_tokens,
+            )[0]
+        except ValueError:
+            results[i] = (None, False)
+        except RuntimeError as e:
+            if "out of memory" not in str(e).lower():
+                raise
+            _clear_device_cache(device)
+            results[i] = (None, False)
+    return results
+
+
 def _process_chunk(chunk, model, processor, device, template, examples, max_new_tokens):
     """Process a single chunk of inputs as a batched forward pass."""
     all_messages = []
     formatted_texts = []
-    results = [(None, False)] * len(chunk)
 
-    for i, item in enumerate(chunk):
+    for item in chunk:
         messages = _build_message(item)
         formatted = processor.tokenizer.apply_chat_template(
             messages,
@@ -322,7 +420,7 @@ def _process_chunk(chunk, model, processor, device, template, examples, max_new_
         formatted_texts.append(formatted)
 
     try:
-        batch_results = _run_batch_inference(
+        return _run_batch_inference(
             all_messages,
             formatted_texts,
             model,
@@ -331,61 +429,22 @@ def _process_chunk(chunk, model, processor, device, template, examples, max_new_
             examples,
             max_new_tokens,
         )
-        for i, res in enumerate(batch_results):
-            results[i] = res
-    except ValueError:
-        if len(chunk) == 1:
-            # Single item (from extract() wrapper): propagate ValueError
-            raise
-        # Multi-item batch: fall back to one-at-a-time
-        for i, (messages, formatted) in enumerate(zip(all_messages, formatted_texts)):
-            try:
-                results[i] = _run_batch_inference(
-                    [messages],
-                    [formatted],
-                    model,
-                    processor,
-                    device,
-                    examples,
-                    max_new_tokens,
-                )[0]
-            except ValueError:
-                results[i] = (None, False)
-            except RuntimeError as e2:
-                if "out of memory" not in str(e2).lower():
-                    raise
-                _clear_device_cache(device)
-                results[i] = (None, False)
-    except RuntimeError as e:
-        if "out of memory" not in str(e).lower():
+    except (ValueError, RuntimeError) as e:
+        if isinstance(e, RuntimeError) and "out of memory" not in str(e).lower():
             raise
         if len(chunk) == 1:
-            # Single item (from extract() wrapper): propagate RuntimeError
             raise
-        _clear_device_cache(device)
-        # Fallback: process each item sequentially
-        for i, (messages, formatted) in enumerate(zip(all_messages, formatted_texts)):
-            try:
-                results[i] = _run_batch_inference(
-                    [messages],
-                    [formatted],
-                    model,
-                    processor,
-                    device,
-                    examples,
-                    max_new_tokens,
-                )[0]
-            except (ValueError, RuntimeError) as e2:
-                if (
-                    isinstance(e2, RuntimeError)
-                    and "out of memory" not in str(e2).lower()
-                ):
-                    raise
-                if isinstance(e2, RuntimeError):
-                    _clear_device_cache(device)
-                results[i] = (None, False)
-
-    return results
+        if isinstance(e, RuntimeError):
+            _clear_device_cache(device)
+        return _sequential_fallback(
+            all_messages,
+            formatted_texts,
+            model,
+            processor,
+            device,
+            examples,
+            max_new_tokens,
+        )
 
 
 def _run_batch_inference(
@@ -569,34 +628,19 @@ with text_tab:
             if not input_text.strip():
                 st.warning("Enter some text.")
             else:
+                effective = (
+                    _convert_template_if_needed(json_str, source_format) or template_str
+                )
                 with st.spinner("Extracting..."):
-                    try:
-                        converted = _convert_template_if_needed(json_str, source_format)
-                        if converted:
-                            template_str = converted
-                        result, was_truncated = extract(
-                            input_text,
-                            model,
-                            processor,
-                            device,
-                            template_str,
-                            examples_parsed,
-                            max_new_tokens=max_new_tokens,
-                        )
-                        if was_truncated:
-                            st.warning(
-                                "Output may be truncated — consider increasing max tokens."
-                            )
-                        if result is not None:
-                            st.json(result)
-                        else:
-                            st.error(
-                                "Extraction failed — could not parse model output as JSON."
-                            )
-                    except ValueError as e:
-                        st.error(str(e))
-                    except RuntimeError as e:
-                        st.error(f"Runtime error: {e}. Try reducing max tokens.")
+                    _run_single_extraction(
+                        input_text,
+                        model,
+                        processor,
+                        device,
+                        effective,
+                        examples_parsed,
+                        max_new_tokens=max_new_tokens,
+                    )
 
 with image_tab:
     uploaded_image = st.file_uploader(
@@ -613,35 +657,20 @@ with image_tab:
             if uploaded_image is None:
                 st.warning("Upload an image.")
             else:
+                effective = (
+                    _convert_template_if_needed(json_str, source_format) or template_str
+                )
                 with st.spinner("Extracting..."):
-                    try:
-                        converted = _convert_template_if_needed(json_str, source_format)
-                        if converted:
-                            template_str = converted
-                        result, was_truncated = extract(
-                            image_context or None,
-                            model,
-                            processor,
-                            device,
-                            template_str,
-                            examples_parsed,
-                            image=pil_image,
-                            max_new_tokens=max_new_tokens,
-                        )
-                        if was_truncated:
-                            st.warning(
-                                "Output may be truncated — consider increasing max tokens."
-                            )
-                        if result is not None:
-                            st.json(result)
-                        else:
-                            st.error(
-                                "Extraction failed — could not parse model output as JSON."
-                            )
-                    except ValueError as e:
-                        st.error(str(e))
-                    except RuntimeError as e:
-                        st.error(f"Runtime error: {e}. Try reducing max tokens.")
+                    _run_single_extraction(
+                        image_context or None,
+                        model,
+                        processor,
+                        device,
+                        effective,
+                        examples_parsed,
+                        image=pil_image,
+                        max_new_tokens=max_new_tokens,
+                    )
 
 with image_batch_tab:
     uploaded_images = st.file_uploader(
@@ -795,24 +824,24 @@ with csv_tab:
             )
             use_images = selected_image_column != "None"
 
-            if use_images:
-                csv_batch_size = st.slider(
-                    "Batch size",
-                    min_value=1,
-                    max_value=8,
-                    value=4,
-                    step=1,
-                    key="csv_batch_size",
-                    help="Images per inference batch. Lower if running out of memory.",
-                )
+            csv_batch_size = st.slider(
+                "Batch size",
+                min_value=1,
+                max_value=8,
+                value=4,
+                step=1,
+                key="csv_batch_size",
+                help="Items per inference batch. Lower if running out of memory.",
+            )
 
             if st.button("Extract", type="primary", key="csv_extract"):
                 if not _has_config_errors(
                     template_error, examples_error, template_parsed
                 ):
-                    converted = _convert_template_if_needed(json_str, source_format)
-                    if converted:
-                        template_str = converted
+                    effective_template = (
+                        _convert_template_if_needed(json_str, source_format)
+                        or template_str
+                    )
 
                     if use_images:
                         batch_inputs = []
@@ -864,7 +893,7 @@ with csv_tab:
                                     model,
                                     processor,
                                     device,
-                                    template_str,
+                                    effective_template,
                                     examples_parsed,
                                     max_new_tokens=max_new_tokens,
                                     chunk_size=csv_batch_size,
@@ -883,103 +912,67 @@ with csv_tab:
 
                         if results is not None:
                             progress_bar.progress(1.0, text="Done.")
-                            if skipped_rows:
-                                st.warning(
-                                    f"Rows skipped (input too long): {skipped_rows}"
-                                )
-                            if truncated_rows:
-                                st.warning(f"Rows possibly truncated: {truncated_rows}")
-
-                            fields = list(template_parsed.keys())
-                            for field in fields:
-                                df[field] = [
-                                    r.get(field, "") if r is not None else ""
-                                    for r in results
-                                ]
-
-                            st.write("Preview")
-                            st.dataframe(
-                                df[[selected_column] + fields].head(),
-                                width="stretch",
-                            )
-
-                            total = len(df)
-                            failed = sum(1 for r in results if r is None)
-
-                            col1, col2, col3 = st.columns(3)
-                            col1.metric("Total Rows", total)
-                            col2.metric("Extracted", total - failed)
-                            col3.metric("Failed", failed)
-
-                            base_name = uploaded_file.name.rsplit(".", 1)[0]
-                            st.download_button(
-                                label="Download",
-                                data=df.to_csv(index=False),
-                                file_name=f"{base_name}_extract.csv",
-                                mime="text/csv",
+                            _display_csv_results(
+                                df,
+                                results,
+                                skipped_rows,
+                                truncated_rows,
+                                template_parsed,
+                                selected_column,
+                                uploaded_file.name,
                             )
                     else:
-                        # Text-only: existing extract() loop preserved
-                        results = []
+                        batch_inputs = [
+                            {"text": text, "image": None, "context": None}
+                            for text in df[selected_column].astype(str)
+                        ]
+
                         progress_bar = st.progress(0, text="Starting...")
+                        results = None
                         skipped_rows = []
                         truncated_rows = []
-                        for i, text in enumerate(df[selected_column].astype(str)):
+
+                        def update_text_progress(completed, total):
+                            progress_bar.progress(
+                                completed / total,
+                                text=f"Processing {completed} of {total} rows...",
+                            )
+
+                        with st.spinner("Extracting..."):
                             try:
-                                result, was_truncated = extract(
-                                    text,
+                                results_tuples = extract_batch(
+                                    batch_inputs,
                                     model,
                                     processor,
                                     device,
-                                    template_str,
+                                    effective_template,
                                     examples_parsed,
                                     max_new_tokens=max_new_tokens,
+                                    chunk_size=csv_batch_size,
+                                    progress_callback=update_text_progress,
                                 )
-                                if was_truncated:
-                                    truncated_rows.append(i + 1)
-                            except (ValueError, RuntimeError):
-                                result = None
-                                skipped_rows.append(i + 1)
-                            results.append(result)
-                            progress_bar.progress(
-                                (i + 1) / len(df),
-                                text=f"Processing row {i + 1} of {len(df)}",
+                                results = [r for r, _ in results_tuples]
+                                truncated_rows = [
+                                    i + 1
+                                    for i, (_, trunc) in enumerate(results_tuples)
+                                    if trunc
+                                ]
+                            except RuntimeError as e:
+                                st.error(
+                                    f"Runtime error: {e}. Try reducing batch size."
+                                )
+
+                        if results is not None:
+                            progress_bar.progress(1.0, text="Done.")
+                            _display_csv_results(
+                                df,
+                                results,
+                                skipped_rows,
+                                truncated_rows,
+                                template_parsed,
+                                selected_column,
+                                uploaded_file.name,
                             )
-
-                        progress_bar.progress(1.0, text="Done.")
-                        if skipped_rows:
-                            st.warning(f"Rows skipped (input too long): {skipped_rows}")
-                        if truncated_rows:
-                            st.warning(f"Rows possibly truncated: {truncated_rows}")
-
-                        fields = list(template_parsed.keys())
-                        for field in fields:
-                            df[field] = [
-                                r.get(field, "") if r is not None else ""
-                                for r in results
-                            ]
-
-                        st.write("Preview")
-                        st.dataframe(
-                            df[[selected_column] + fields].head(),
-                            width="stretch",
-                        )
-
-                        total = len(df)
-                        failed = sum(1 for r in results if r is None)
-
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Rows", total)
-                        col2.metric("Extracted", total - failed)
-                        col3.metric("Failed", failed)
-
-                        base_name = uploaded_file.name.rsplit(".", 1)[0]
-                        st.download_button(
-                            label="Download",
-                            data=df.to_csv(index=False),
-                            file_name=f"{base_name}_extract.csv",
-                            mime="text/csv",
-                        )
 
         except (pd.errors.ParserError, KeyError, UnicodeDecodeError) as e:
             st.error(f"Error: {e}")
