@@ -536,7 +536,9 @@ with st.sidebar:
     if examples_error:
         st.error(examples_error)
 
-text_tab, image_tab, csv_tab = st.tabs(["Text", "Image", "CSV Batch"])
+text_tab, image_tab, image_batch_tab, csv_tab = st.tabs(
+    ["Text", "Image", "Image Batch", "CSV Batch"]
+)
 
 with text_tab:
     input_text = st.text_area(

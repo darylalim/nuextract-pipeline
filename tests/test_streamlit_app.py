@@ -24,7 +24,7 @@ def app():
     import streamlit as st
     from transformers import AutoModelForImageTextToText, AutoProcessor
 
-    tab_mocks = [MagicMock(), MagicMock(), MagicMock()]
+    tab_mocks = [MagicMock(), MagicMock(), MagicMock(), MagicMock()]
 
     with (
         patch.object(st, "title"),
