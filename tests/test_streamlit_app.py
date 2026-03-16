@@ -236,6 +236,70 @@ def test_convert_template_returns_none(app, fmt):
     assert app._convert_template_if_needed('{"name": "string"}', fmt) is None
 
 
+# --- _run_single_extraction ---
+
+
+def test_run_single_extraction_success(app):
+    with (
+        patch.object(app, "extract", return_value=({"company": "Acme"}, False)),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_single_extraction(
+            "text", MagicMock(), MagicMock(), "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+    mock_st.json.assert_called_once_with({"company": "Acme"})
+    mock_st.warning.assert_not_called()
+    mock_st.error.assert_not_called()
+
+
+def test_run_single_extraction_truncated(app):
+    with (
+        patch.object(app, "extract", return_value=({"company": "Acme"}, True)),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_single_extraction(
+            "text", MagicMock(), MagicMock(), "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+    mock_st.json.assert_called_once_with({"company": "Acme"})
+    mock_st.warning.assert_called_once()
+    assert "truncated" in mock_st.warning.call_args[0][0].lower()
+
+
+def test_run_single_extraction_parse_failure(app):
+    with (
+        patch.object(app, "extract", return_value=(None, False)),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_single_extraction(
+            "text", MagicMock(), MagicMock(), "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+    mock_st.error.assert_called_once()
+    assert "json" in mock_st.error.call_args[0][0].lower()
+
+
+def test_run_single_extraction_valueerror(app):
+    with (
+        patch.object(app, "extract", side_effect=ValueError("Input too long")),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_single_extraction(
+            "text", MagicMock(), MagicMock(), "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+    mock_st.error.assert_called_once_with("Input too long")
+
+
+def test_run_single_extraction_runtimeerror(app):
+    with (
+        patch.object(app, "extract", side_effect=RuntimeError("out of memory")),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_single_extraction(
+            "text", MagicMock(), MagicMock(), "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+    mock_st.error.assert_called_once()
+    assert "runtime error" in mock_st.error.call_args[0][0].lower()
+
+
 # --- extract ---
 
 
@@ -703,6 +767,97 @@ def test_clear_device_cache_cpu_is_noop(app):
         mock_torch.cuda.empty_cache.assert_not_called()
 
 
+# --- _sequential_fallback ---
+
+
+def test_sequential_fallback_all_succeed(app):
+    with patch.object(
+        app,
+        "_run_batch_inference",
+        side_effect=[
+            [({"company": "Acme"}, False)],
+            [({"company": "Beta"}, False)],
+        ],
+    ):
+        results = app._sequential_fallback(
+            [["msg1"], ["msg2"]],
+            ["fmt1", "fmt2"],
+            MagicMock(),
+            MagicMock(),
+            "cpu",
+            TEST_EXAMPLES,
+            2048,
+        )
+    assert results[0] == ({"company": "Acme"}, False)
+    assert results[1] == ({"company": "Beta"}, False)
+
+
+def test_sequential_fallback_valueerror_skips_item(app):
+    with patch.object(
+        app,
+        "_run_batch_inference",
+        side_effect=[
+            ValueError("too long"),
+            [({"company": "Beta"}, False)],
+        ],
+    ):
+        results = app._sequential_fallback(
+            [["msg1"], ["msg2"]],
+            ["fmt1", "fmt2"],
+            MagicMock(),
+            MagicMock(),
+            "cpu",
+            TEST_EXAMPLES,
+            2048,
+        )
+    assert results[0] == (None, False)
+    assert results[1] == ({"company": "Beta"}, False)
+
+
+def test_sequential_fallback_oom_clears_cache(app):
+    with (
+        patch.object(
+            app,
+            "_run_batch_inference",
+            side_effect=[
+                RuntimeError("CUDA out of memory"),
+                [({"company": "Beta"}, False)],
+            ],
+        ),
+        patch.object(app, "_clear_device_cache") as mock_clear,
+    ):
+        results = app._sequential_fallback(
+            [["msg1"], ["msg2"]],
+            ["fmt1", "fmt2"],
+            MagicMock(),
+            MagicMock(),
+            "cpu",
+            TEST_EXAMPLES,
+            2048,
+        )
+    assert results[0] == (None, False)
+    assert results[1] == ({"company": "Beta"}, False)
+    mock_clear.assert_called_once_with("cpu")
+
+
+def test_sequential_fallback_non_oom_propagates(app):
+    with patch.object(
+        app,
+        "_run_batch_inference",
+        side_effect=RuntimeError("some other error"),
+    ):
+        with pytest.raises(RuntimeError, match="some other error"):
+            app._sequential_fallback(
+                [["msg1"]],
+                ["fmt1"],
+                MagicMock(),
+                MagicMock(),
+                "cpu",
+                TEST_EXAMPLES,
+                2048,
+            )
+
+
 # --- extract_batch ---
 
 
@@ -1059,3 +1214,77 @@ def test_load_csv_image_invalid_path(app):
 @pytest.mark.parametrize("value", ["", "nan", None])
 def test_load_csv_image_returns_none_for_empty(app, value):
     assert app._load_csv_image(value) is None
+
+
+# --- _display_csv_results ---
+
+
+def test_display_csv_results_normal(app):
+    import pandas as pd
+
+    df = pd.DataFrame({"text": ["a", "b"]})
+    results = [{"company": "Acme"}, {"company": "Beta"}]
+
+    with patch("streamlit_app.st") as mock_st:
+        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
+        mock_st.columns.return_value = [col1, col2, col3]
+        app._display_csv_results(
+            df, results, [], [], {"company": "string"}, "text", "test.csv"
+        )
+    mock_st.write.assert_called_once_with("Preview")
+    mock_st.dataframe.assert_called_once()
+    mock_st.download_button.assert_called_once()
+    assert mock_st.download_button.call_args[1]["file_name"] == "test_extract.csv"
+    mock_st.warning.assert_not_called()
+    col1.metric.assert_called_once_with("Total Rows", 2)
+    col2.metric.assert_called_once_with("Extracted", 2)
+    col3.metric.assert_called_once_with("Failed", 0)
+
+
+def test_display_csv_results_skipped_rows(app):
+    import pandas as pd
+
+    df = pd.DataFrame({"text": ["a"]})
+    results = [{"company": "Acme"}]
+
+    with patch("streamlit_app.st") as mock_st:
+        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
+        mock_st.columns.return_value = [col1, col2, col3]
+        app._display_csv_results(
+            df, results, [1, 3], [], {"company": "string"}, "text", "test.csv"
+        )
+    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
+    assert any("skipped" in w.lower() for w in warnings)
+
+
+def test_display_csv_results_truncated_rows(app):
+    import pandas as pd
+
+    df = pd.DataFrame({"text": ["a"]})
+    results = [{"company": "Acme"}]
+
+    with patch("streamlit_app.st") as mock_st:
+        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
+        mock_st.columns.return_value = [col1, col2, col3]
+        app._display_csv_results(
+            df, results, [], [2, 4], {"company": "string"}, "text", "test.csv"
+        )
+    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
+    assert any("truncated" in w.lower() for w in warnings)
+
+
+def test_display_csv_results_all_none(app):
+    import pandas as pd
+
+    df = pd.DataFrame({"text": ["a", "b", "c"]})
+    results = [None, None, None]
+
+    with patch("streamlit_app.st") as mock_st:
+        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
+        mock_st.columns.return_value = [col1, col2, col3]
+        app._display_csv_results(
+            df, results, [], [], {"company": "string"}, "text", "test.csv"
+        )
+    col1.metric.assert_called_once_with("Total Rows", 3)
+    col2.metric.assert_called_once_with("Extracted", 0)
+    col3.metric.assert_called_once_with("Failed", 3)
