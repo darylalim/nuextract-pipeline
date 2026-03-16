@@ -4,25 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-
-def make_mocks(decode_output):
-    """Create mock model and processor that produce the given decode output."""
-    processor = MagicMock()
-    input_ids = torch.tensor([[1, 2, 3, 4, 5]])
-    inputs_dict = {
-        "input_ids": input_ids,
-        "attention_mask": torch.ones_like(input_ids),
-    }
-    proc_result = MagicMock()
-    proc_result.to.return_value = inputs_dict
-    processor.return_value = proc_result
-    processor.tokenizer.apply_chat_template.return_value = "formatted prompt"
-    processor.batch_decode.return_value = [decode_output]
-
-    model = MagicMock()
-    model.generate.return_value = torch.tensor([[1, 2, 3, 4, 5, 10, 20, 30]])
-
-    return model, processor
+from conftest import make_mocks
 
 
 # --- generate_template ---
