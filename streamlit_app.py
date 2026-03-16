@@ -194,49 +194,20 @@ def extract(
     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
 ):
     if image is not None:
-        content = [{"type": "image", "image": image}]
-        if input_content:
-            content.append({"type": "text", "text": input_content})
-        messages = [{"role": "user", "content": content}]
-        image_inputs = process_all_vision_info(messages, examples)
+        batch_input = {"text": None, "image": image, "context": input_content}
     else:
-        messages = [{"role": "user", "content": input_content}]
-        image_inputs = None
-
-    formatted = processor.tokenizer.apply_chat_template(
-        messages,
-        template=template,
-        examples=examples,
-        tokenize=False,
-        add_generation_prompt=True,
+        batch_input = {"text": input_content, "image": None, "context": None}
+    results = extract_batch(
+        [batch_input],
+        model,
+        processor,
+        device,
+        template,
+        examples,
+        max_new_tokens=max_new_tokens,
+        chunk_size=1,
     )
-    inputs = processor(
-        text=[formatted], images=image_inputs, padding=True, return_tensors="pt"
-    ).to(device)
-    input_len = inputs["input_ids"].shape[1]
-    if input_len > MAX_INPUT_TOKENS:
-        raise ValueError(
-            f"Input too long: {input_len} tokens (limit: {MAX_INPUT_TOKENS})."
-        )
-
-    with torch.inference_mode():
-        output = model.generate(
-            **inputs,
-            do_sample=False,
-            num_beams=1,
-            max_new_tokens=max_new_tokens,
-        )
-
-    trimmed = output[:, input_len:]
-    was_truncated = trimmed.shape[1] == max_new_tokens
-    decoded = processor.batch_decode(
-        trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-    )
-
-    try:
-        return json.loads(decoded[0]), was_truncated
-    except (json.JSONDecodeError, IndexError):
-        return None, was_truncated
+    return results[0]
 
 
 def _has_config_errors(template_error, examples_error, template_parsed):
@@ -292,6 +263,8 @@ def extract_batch(
                 chunk, model, processor, device, template, examples, max_new_tokens
             )
         except ValueError:
+            if total == 1:
+                raise
             chunk_results = [(None, False)] * len(chunk)
         all_results.extend(chunk_results)
         if progress_callback:
@@ -365,6 +338,9 @@ def _process_chunk(chunk, model, processor, device, template, examples, max_new_
                 results[i] = (None, False)
     except RuntimeError as e:
         if "out of memory" not in str(e).lower():
+            raise
+        if len(chunk) == 1:
+            # Single item (from extract() wrapper): propagate RuntimeError
             raise
         _clear_device_cache(device)
         # Fallback: process each item sequentially

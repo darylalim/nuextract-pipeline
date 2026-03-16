@@ -502,7 +502,8 @@ def test_extract_image_builds_vision_message(app):
         )
 
         mock_pavi.assert_called_once()
-        messages = mock_pavi.call_args[0][0]
+        batched_messages = mock_pavi.call_args[0][0]
+        messages = batched_messages[0]
         assert messages[0]["role"] == "user"
         content = messages[0]["content"]
         assert content[0]["type"] == "image"
@@ -542,7 +543,8 @@ def test_extract_image_no_context_text(app):
             image=fake_image,
         )
 
-        messages = mock_pavi.call_args[0][0]
+        batched_messages = mock_pavi.call_args[0][0]
+        messages = batched_messages[0]
         content = messages[0]["content"]
         assert len(content) == 1
         assert content[0]["type"] == "image"
@@ -1167,3 +1169,47 @@ def test_extract_batch_passes_template_and_examples(app):
     call_args = processor.tokenizer.apply_chat_template.call_args
     assert call_args[1]["template"] == TEST_TEMPLATE
     assert call_args[1]["examples"] == TEST_EXAMPLES
+
+
+# --- extract() wrapper ---
+
+
+def test_extract_delegates_to_extract_batch(app):
+    output = json.dumps({"company": "Acme", "revenue": "$1B"})
+    model, processor = make_mocks(output)
+    with patch.object(
+        app,
+        "extract_batch",
+        return_value=[({"company": "Acme", "revenue": "$1B"}, False)],
+    ) as mock_eb:
+        result, was_truncated = app.extract(
+            "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+    mock_eb.assert_called_once()
+    call_args = mock_eb.call_args
+    batch_input = call_args[0][0][0]
+    assert batch_input == {"text": "some text", "image": None, "context": None}
+    assert call_args[1]["chunk_size"] == 1
+    assert result == {"company": "Acme", "revenue": "$1B"}
+    assert was_truncated is False
+
+
+def test_extract_wrapper_image_maps_to_context(app):
+    model, processor = make_mocks(json.dumps({"company": "Acme"}))
+    fake_image = MagicMock()
+    with patch.object(
+        app, "extract_batch", return_value=[({"company": "Acme"}, False)]
+    ) as mock_eb:
+        app.extract(
+            "context text",
+            model,
+            processor,
+            "cpu",
+            TEST_TEMPLATE,
+            TEST_EXAMPLES,
+            image=fake_image,
+        )
+    batch_input = mock_eb.call_args[0][0][0]
+    assert batch_input["text"] is None
+    assert batch_input["image"] is fake_image
+    assert batch_input["context"] == "context text"
