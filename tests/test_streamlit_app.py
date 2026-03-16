@@ -673,6 +673,19 @@ def test_load_model_uses_trust_remote_code(app):
         assert mock_proc.from_pretrained.call_args[1]["trust_remote_code"] is True
 
 
+def test_load_model_clears_generation_temperature(app):
+    with (
+        patch.object(app, "AutoModelForImageTextToText") as mock_cls,
+        patch.object(app, "AutoProcessor") as mock_proc,
+    ):
+        mock_model = MagicMock()
+        mock_model.generation_config.temperature = 0.6
+        mock_cls.from_pretrained.return_value = mock_model
+        mock_proc.from_pretrained.return_value = MagicMock()
+        model, _ = app.load_model("cpu")
+        assert model.generation_config.temperature is None
+
+
 # --- load_presets ---
 
 
