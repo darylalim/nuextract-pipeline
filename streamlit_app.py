@@ -191,7 +191,7 @@ def _render_config():
         st.session_state["template_input"] = DEFAULT_TEMPLATE
     template_str = st.text_area(
         "JSON template",
-        height=100,
+        height=300,
         key="template_input",
     )
     json_str, source_format, template_error = detect_and_convert_template(template_str)
@@ -284,18 +284,13 @@ st.title("NuExtract Pipeline")
 with st.spinner(f"Loading {MODEL_ID}..."):
     model, tokenizer = load_model()
 
+template_str, json_str, source_format, template_error, template_parsed, max_new_tokens = (
+    _render_config()
+)
+
 text_tab, csv_tab = st.tabs(["Text", "CSV Batch"])
 
 with text_tab:
-    (
-        template_str,
-        json_str,
-        source_format,
-        template_error,
-        template_parsed,
-        max_new_tokens,
-    ) = _render_config()
-
     input_text = st.text_area(
         "Enter text to extract from", height=150, key="text_input"
     )
@@ -317,15 +312,6 @@ with text_tab:
                     )
 
 with csv_tab:
-    (
-        template_str,
-        json_str,
-        source_format,
-        template_error,
-        template_parsed,
-        max_new_tokens,
-    ) = _render_config()
-
     uploaded_file = st.file_uploader(
         "Upload CSV file",
         type=["csv"],
