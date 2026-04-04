@@ -104,4 +104,8 @@ def detect_and_convert_template(template_str):
         pass
 
     # No format matched
-    return None, None, "Unrecognized format. Provide a JSON, YAML, or Pydantic template."
+    return (
+        None,
+        None,
+        "Unrecognized format. Provide a JSON, YAML, or Pydantic template.",
+    )
