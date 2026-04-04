@@ -140,6 +140,92 @@ def test_get_effective_template_returns_original(app, fmt):
     assert result == "original"
 
 
+# --- _render_config ---
+
+
+def test_render_config_returns_all_fields(app):
+    """_render_config returns a tuple of (template_str, json_str, source_format, template_error, template_parsed, max_new_tokens)."""
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.session_state = {"template_input": '{"name": ""}', "prev_preset": "Custom"}
+        mock_st.text_area.return_value = '{"name": ""}'
+        mock_st.slider.return_value = 2048
+        mock_st.selectbox.return_value = "Custom"
+        mock_st.expander.return_value.__enter__ = MagicMock()
+        mock_st.expander.return_value.__exit__ = MagicMock()
+
+        result = app._render_config()
+
+    assert len(result) == 6
+    template_str, json_str, source_format, template_error, template_parsed, max_new_tokens = result
+    assert template_str == '{"name": ""}'
+    assert source_format == "json"
+    assert template_error is None
+    assert template_parsed == {"name": ""}
+    assert max_new_tokens == 2048
+
+
+def test_render_config_detects_yaml(app):
+    """_render_config detects YAML templates and returns converted JSON."""
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.session_state = {"template_input": 'name: ""\nage: ""', "prev_preset": "Custom"}
+        mock_st.text_area.return_value = 'name: ""\nage: ""'
+        mock_st.slider.return_value = 2048
+        mock_st.selectbox.return_value = "Custom"
+        mock_st.expander.return_value.__enter__ = MagicMock()
+        mock_st.expander.return_value.__exit__ = MagicMock()
+        mock_st.info = MagicMock()
+
+        result = app._render_config()
+
+    _, json_str, source_format, template_error, template_parsed, _ = result
+    assert source_format == "yaml"
+    assert template_error is None
+    assert template_parsed == {"name": "", "age": ""}
+
+
+def test_render_config_invalid_template(app):
+    """_render_config returns error for invalid template."""
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.session_state = {"template_input": "not valid", "prev_preset": "Custom"}
+        mock_st.text_area.return_value = "not valid"
+        mock_st.slider.return_value = 2048
+        mock_st.selectbox.return_value = "Custom"
+        mock_st.expander.return_value.__enter__ = MagicMock()
+        mock_st.expander.return_value.__exit__ = MagicMock()
+        mock_st.error = MagicMock()
+
+        result = app._render_config()
+
+    _, _, source_format, template_error, template_parsed, _ = result
+    assert source_format is None
+    assert template_error is not None
+    assert template_parsed is None
+
+
+def test_render_config_preset_change_updates_session(app):
+    """When preset changes, _render_config updates session state and reruns."""
+    presets = [{"name": "Person", "template": {"first_name": ""}, "sample_text": "Maria"}]
+
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.session_state = {"template_input": '{"old": ""}', "prev_preset": "Custom"}
+        mock_st.selectbox.return_value = "Person"
+        mock_st.slider.return_value = 2048
+
+        with patch.object(app, "load_presets", return_value=presets):
+            try:
+                app._render_config()
+            except Exception:
+                pass  # st.rerun() raises in test context
+
+        assert mock_st.session_state["prev_preset"] == "Person"
+        assert '"first_name"' in mock_st.session_state["template_input"]
+        assert mock_st.session_state["text_input"] == "Maria"
+
+
 # --- _run_single_extraction ---
 
 

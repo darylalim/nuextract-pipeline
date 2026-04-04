@@ -145,6 +145,77 @@ def _get_effective_template(json_str, source_format, template_str):
     return template_str
 
 
+def _render_config():
+    """Render config controls (preset, template, max tokens) and return state.
+
+    Returns (template_str, json_str, source_format, template_error,
+             template_parsed, max_new_tokens).
+    """
+    presets = load_presets()
+    preset_names = [p["name"] for p in presets] + ["Custom"]
+
+    if "prev_preset" not in st.session_state:
+        st.session_state["prev_preset"] = "Custom"
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        selected_preset = st.selectbox(
+            "Load preset", preset_names, index=len(preset_names) - 1, key="preset_selector"
+        )
+
+    if selected_preset != st.session_state["prev_preset"]:
+        st.session_state["prev_preset"] = selected_preset
+        if selected_preset != "Custom":
+            preset = next(p for p in presets if p["name"] == selected_preset)
+            st.session_state["template_input"] = json.dumps(
+                preset["template"], indent=2
+            )
+            st.session_state["text_input"] = preset["sample_text"]
+            st.rerun()
+
+    with col2:
+        max_new_tokens = st.slider(
+            "Max new tokens",
+            min_value=64,
+            max_value=4096,
+            value=DEFAULT_MAX_NEW_TOKENS,
+            step=64,
+            help="Maximum tokens to generate. Increase for complex templates.",
+        )
+
+    if "template_input" not in st.session_state:
+        st.session_state["template_input"] = DEFAULT_TEMPLATE
+    template_str = st.text_area(
+        "JSON template",
+        height=100,
+        key="template_input",
+    )
+    json_str, source_format, template_error = detect_and_convert_template(template_str)
+    if source_format == "json":
+        template_parsed, _ = validate_template(template_str)
+    elif source_format in ("yaml", "pydantic", "pydantic_with_unknown"):
+        fmt_label = "pydantic" if "pydantic" in source_format else source_format
+        st.info(f"Detected {fmt_label} template — will convert to JSON on extract.")
+        if source_format == "pydantic_with_unknown":
+            st.warning(
+                "Nested models simplified to empty string; edit the JSON template to add structure."
+            )
+        template_parsed, _ = validate_template(json_str)
+    else:
+        st.error(template_error)
+        template_parsed = None
+    with st.expander("Template format"):
+        st.markdown(
+            '- Use `""` (empty string) as placeholder for text fields\n'
+            "- Use `[]` (empty array) for list fields\n"
+            "- Use nested objects for structured fields\n\n"
+            "The model extracts text verbatim from the input to fill placeholders."
+        )
+
+    return template_str, json_str, source_format, template_error, template_parsed, max_new_tokens
+
+
 def _run_single_extraction(
     text, model, tokenizer, template_str, max_new_tokens=DEFAULT_MAX_NEW_TOKENS
 ):
