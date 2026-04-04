@@ -8,7 +8,7 @@ Structured extraction pipeline using [NuExtract-1.5-MLX-8bit](https://huggingfac
 - **CSV batch processing** — extract from every row in a CSV file with progress tracking
 - **Multi-format templates** — accepts JSON, YAML, or Pydantic model definitions
 - **Extraction presets** — 5 built-in presets (Person, Job Posting, Invoice, Product, Scientific Paper)
-- **Configurable output length** — sidebar slider for max new tokens (64–4096, default 2048)
+- **Configurable output length** — inline slider for max new tokens (64–4096, default 2048)
 - **Token limit** — enforces a 4,096 input token limit to prevent memory issues
 - **Multi-language** — supports English, French, Spanish, German, Portuguese, Italian
 
@@ -45,7 +45,7 @@ utils.py                  # Template format detection and conversion
 presets.json              # 5 built-in extraction presets
 tests/
   conftest.py             # Shared test fixtures
-  test_streamlit_app.py   # App tests (44 tests)
+  test_streamlit_app.py   # App tests (48 tests)
   test_utils.py           # Utility tests (16 tests)
   data/csv/               # Sample test data
 ```

@@ -32,9 +32,10 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **`extract(text, model, tokenizer, template, max_new_tokens)`** — Runs extraction via `mlx_lm.generate()`; enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); strips `<|end-output|>` marker; returns `(result, was_truncated)`
 - **`_has_config_errors(template_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
 - **`_get_effective_template(json_str, source_format, template_str)`** — Returns JSON template, converting from YAML/Pydantic if needed and updating session state
+- **`_render_config()`** — Renders inline config controls (preset selector, max tokens slider, template editor, format expander); returns `(template_str, json_str, source_format, template_error, template_parsed, max_new_tokens)`; called once above tabs
 - **`_run_single_extraction(text, model, tokenizer, template_str, max_new_tokens)`** — Runs single extraction and displays results; handles truncation warning, JSON parse failure, ValueError, and RuntimeError
 - **`_display_csv_results(df, results, truncated_rows, template_parsed, selected_column, filename)`** — Displays CSV extraction results: truncated warnings, preview dataframe, metrics (Total/Extracted/Failed), download button
-- **Streamlit UI** — Sidebar with preset selector, generation slider (64–4096 tokens), template config; two tabs: Text, CSV Batch
+- **Streamlit UI** — Config rendered once above tabs via `_render_config()` (preset selector + max tokens slider side-by-side, then template editor); two tabs: Text, CSV Batch
 - **Text tab** — Single text input with Extract button
 - **CSV Batch tab** — CSV upload with text column selector; sequential extraction with progress bar
 
@@ -49,11 +50,11 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 
 5 extraction presets (Person, Job Posting, Invoice, Product, Scientific Paper) with templates and sample text. Templates use empty string placeholders (`""` for fields, `[]` for arrays). Loaded by `load_presets()` at app startup.
 
-Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (44 tests) and `tests/test_utils.py` (16 tests).
+Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (48 tests) and `tests/test_utils.py` (16 tests).
 
 ## Key Details
 
-- Default 2048 new tokens per extraction (`DEFAULT_MAX_NEW_TOKENS`); configurable via sidebar slider (64–4096)
+- Default 2048 new tokens per extraction (`DEFAULT_MAX_NEW_TOKENS`); configurable via inline slider (64–4096)
 - Max 4,096 input tokens (`MAX_INPUT_TOKENS`); raises `ValueError` if exceeded
 - NuExtract-1.5 prompt format: `<|input|>\n### Template:\n{template}\n### Text:\n{text}\n\n<|output|>\n`
 - Template field accepts JSON, YAML, or Pydantic models; YAML/Pydantic auto-detected and converted on Extract
