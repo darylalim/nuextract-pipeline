@@ -26,7 +26,10 @@ def app():
         patch.object(st, "spinner"),
         patch.object(st, "info"),
         patch.object(st, "error"),
-        patch.object(st, "sidebar", MagicMock()),
+        patch.object(st, "columns", return_value=[MagicMock(), MagicMock()]),
+        patch.object(st, "selectbox", return_value="Custom"),
+        patch.object(st, "slider", return_value=2048),
+        patch.object(st, "expander"),
         patch.object(st, "cache_resource", side_effect=lambda f: f),
         patch.object(st, "cache_data", side_effect=lambda f: f),
         patch("streamlit_app.mlx_load", return_value=(MagicMock(), MagicMock())),
@@ -147,7 +150,10 @@ def test_render_config_returns_all_fields(app):
     """_render_config returns a tuple of (template_str, json_str, source_format, template_error, template_parsed, max_new_tokens)."""
     with patch("streamlit_app.st") as mock_st:
         mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {"template_input": '{"name": ""}', "prev_preset": "Custom"}
+        mock_st.session_state = {
+            "template_input": '{"name": ""}',
+            "prev_preset": "Custom",
+        }
         mock_st.text_area.return_value = '{"name": ""}'
         mock_st.slider.return_value = 2048
         mock_st.selectbox.return_value = "Custom"
@@ -157,7 +163,14 @@ def test_render_config_returns_all_fields(app):
         result = app._render_config()
 
     assert len(result) == 6
-    template_str, json_str, source_format, template_error, template_parsed, max_new_tokens = result
+    (
+        template_str,
+        json_str,
+        source_format,
+        template_error,
+        template_parsed,
+        max_new_tokens,
+    ) = result
     assert template_str == '{"name": ""}'
     assert source_format == "json"
     assert template_error is None
@@ -169,7 +182,10 @@ def test_render_config_detects_yaml(app):
     """_render_config detects YAML templates and returns converted JSON."""
     with patch("streamlit_app.st") as mock_st:
         mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {"template_input": 'name: ""\nage: ""', "prev_preset": "Custom"}
+        mock_st.session_state = {
+            "template_input": 'name: ""\nage: ""',
+            "prev_preset": "Custom",
+        }
         mock_st.text_area.return_value = 'name: ""\nage: ""'
         mock_st.slider.return_value = 2048
         mock_st.selectbox.return_value = "Custom"
@@ -207,11 +223,16 @@ def test_render_config_invalid_template(app):
 
 def test_render_config_preset_change_updates_session(app):
     """When preset changes, _render_config updates session state and reruns."""
-    presets = [{"name": "Person", "template": {"first_name": ""}, "sample_text": "Maria"}]
+    presets = [
+        {"name": "Person", "template": {"first_name": ""}, "sample_text": "Maria"}
+    ]
 
     with patch("streamlit_app.st") as mock_st:
         mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {"template_input": '{"old": ""}', "prev_preset": "Custom"}
+        mock_st.session_state = {
+            "template_input": '{"old": ""}',
+            "prev_preset": "Custom",
+        }
         mock_st.selectbox.return_value = "Person"
         mock_st.slider.return_value = 2048
 
