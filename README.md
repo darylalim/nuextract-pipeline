@@ -1,31 +1,26 @@
-# NuExtract 2.0 Pipeline
+# NuExtract Pipeline
 
-Structured extraction pipeline using [NuExtract-2.0-4B](https://huggingface.co/numind/NuExtract-2.0-4B). Accepts text or images with a user-defined template and optional in-context learning (ICL) examples to extract structured data. Streamlit web UI with text, image, image batch, and CSV batch processing tabs.
+Structured extraction pipeline using [NuExtract-1.5-MLX-8bit](https://huggingface.co/mlx-community/numind-NuExtract-1.5-MLX-8bit). Accepts text with a user-defined template to extract structured data. Streamlit web UI with text and CSV batch processing tabs. Optimized for Apple Silicon via MLX.
 
 ## Features
 
-- **Text extraction** — paste text, define a template, get structured output
-- **Image extraction** — upload an image with optional context text
-- **Image batch extraction** — upload multiple images with shared or per-image context; configurable batch size (1–8)
-- **CSV batch processing** — extract from every row in a CSV file; optional image column for mixed text+image extraction
-- **Multi-format templates** — accepts JSON, YAML, Pydantic models, or natural language descriptions
-- **Auto template generation** — describe what to extract in plain English and generate a JSON template
+- **Text extraction** — paste text, define a template, get structured JSON output
+- **CSV batch processing** — extract from every row in a CSV file with progress tracking
+- **Multi-format templates** — accepts JSON, YAML, or Pydantic model definitions
 - **Extraction presets** — 5 built-in presets (Person, Job Posting, Invoice, Product, Scientific Paper)
-- **ICL examples** — provide input/output examples (text or image URLs) to guide extraction
 - **Configurable output length** — sidebar slider for max new tokens (64–4096, default 2048)
-- **Token limit** — enforces a 10,000 input token limit to prevent OOM errors
-- **OOM recovery** — automatic fallback to sequential processing when batched inference runs out of memory
+- **Token limit** — enforces a 4,096 input token limit to prevent memory issues
+- **Multi-language** — supports English, French, Spanish, German, Portuguese, Italian
+
+## Requirements
+
+- macOS with Apple Silicon (M1/M2/M3/M4)
+- Python 3.12+
 
 ## Installation
 
 ```bash
 uv sync
-```
-
-Optionally set your Hugging Face token for faster downloads:
-
-```bash
-export HF_TOKEN=hf_...
 ```
 
 ## Usage
@@ -34,23 +29,23 @@ export HF_TOKEN=hf_...
 uv run streamlit run streamlit_app.py
 ```
 
+The model (~4 GB) is downloaded automatically on first run.
+
 ## Testing
 
 ```bash
 uv run pytest
 ```
 
-Sample test data is in `tests/data/csv/sample_persons.csv` (30 rows of synthetic person descriptions).
-
 ## Project Structure
 
 ```
-streamlit_app.py          # Main app — UI, validation, extraction
-utils.py                  # Utilities — template detection, generation, vision processing
+streamlit_app.py          # Main app — UI, model loading, extraction
+utils.py                  # Template format detection and conversion
 presets.json              # 5 built-in extraction presets
 tests/
-  conftest.py             # Shared test fixtures and mock helpers
-  test_streamlit_app.py   # Tests for main app (103 tests)
-  test_utils.py           # Tests for utilities (35 tests)
+  conftest.py             # Shared test fixtures
+  test_streamlit_app.py   # App tests (44 tests)
+  test_utils.py           # Utility tests (16 tests)
   data/csv/               # Sample test data
 ```
