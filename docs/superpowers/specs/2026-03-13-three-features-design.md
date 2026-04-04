@@ -2,7 +2,7 @@
 
 ## Overview
 
-Three features added to the text-extraction-pipeline Streamlit app:
+Three features added to the nuextract-pipeline Streamlit app:
 
 1. **Token limit enforcement** — Prevent OOM/hangs on large inputs
 2. **Auto template generation** — Generate JSON templates from natural language descriptions
