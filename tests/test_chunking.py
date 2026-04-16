@@ -180,3 +180,70 @@ def test_default_constants():
     assert DEFAULT_CHUNK_TOKENS == 3500
     assert DEFAULT_OVERLAP_TOKENS == 200
     assert HEADER_ATTACH_ZONE == 100
+
+
+# --- _split_long_line ---
+
+
+def test_split_long_line_short_returns_single(tokenizer):
+    from chunking import _split_long_line
+
+    result = _split_long_line("one two three", tokenizer, max_tokens=10)
+    assert result == ["one two three"]
+
+
+def test_split_long_line_splits_at_word_boundary(tokenizer):
+    from chunking import _split_long_line
+
+    result = _split_long_line("one two three four five six", tokenizer, max_tokens=3)
+    assert len(result) > 1
+    # Every sub-line fits within max_tokens
+    for sub in result:
+        assert len(tokenizer.encode(sub)) <= 3
+
+
+def test_split_long_line_preserves_trailing_newline(tokenizer):
+    from chunking import _split_long_line
+
+    result = _split_long_line("one two three four\n", tokenizer, max_tokens=2)
+    # Last sub-line must keep the newline
+    assert result[-1].endswith("\n")
+
+
+def test_split_long_line_uses_newline_between_subs_when_input_has_newline(tokenizer):
+    from chunking import _split_long_line
+
+    result = _split_long_line("one two three four\n", tokenizer, max_tokens=2)
+    # Intermediate sub-lines get \n, final sub-line keeps the original trailing \n
+    for sub in result[:-1]:
+        assert sub.endswith("\n")
+
+
+def test_split_long_line_uses_space_between_subs_when_no_newline(tokenizer):
+    from chunking import _split_long_line
+
+    result = _split_long_line("one two three four five six", tokenizer, max_tokens=2)
+    # No sub-line should end with a newline since input had no trailing newline
+    for sub in result:
+        assert not sub.endswith("\n")
+
+
+def test_split_long_line_reconstructs_without_newlines(tokenizer):
+    from chunking import _split_long_line
+
+    original = "alpha bravo charlie delta echo foxtrot"
+    result = _split_long_line(original, tokenizer, max_tokens=2)
+    # Rejoining with stripping trailing whitespace reproduces the words in order
+    all_words = []
+    for sub in result:
+        all_words.extend(sub.split())
+    assert all_words == original.split()
+
+
+def test_split_long_line_single_word_kept(tokenizer):
+    from chunking import _split_long_line
+
+    # Single word still returns one sub-line even if tokenizer says it exceeds limit
+    result = _split_long_line("onlyoneword", tokenizer, max_tokens=1)
+    assert len(result) == 1
+    assert "onlyoneword" in result[0]
