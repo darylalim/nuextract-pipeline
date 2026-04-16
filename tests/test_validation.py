@@ -2,12 +2,10 @@ import json
 
 import pytest
 
-SAMPLE_CODES = {"E119", "I10", "J189", "J441", "E785", "F411", "J209"}
-
 
 @pytest.fixture
-def codes():
-    return SAMPLE_CODES
+def codes(sample_icd10_codes):
+    return sample_icd10_codes
 
 
 # --- load_icd10_codes ---
