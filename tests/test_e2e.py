@@ -36,11 +36,12 @@ def test_extract_simple_soap_note(model_and_tokenizer):
         }
     )
     text = (
-        "S: Patient presents with chest pain.\n"
-        "A: Acute myocardial infarction (I21.9)."
+        "S: Patient presents with chest pain.\nA: Acute myocardial infarction (I21.9)."
     )
 
-    result, was_truncated = extract(text, model, tokenizer, template, max_new_tokens=256)
+    result, was_truncated = extract(
+        text, model, tokenizer, template, max_new_tokens=256
+    )
 
     assert result is not None, "Real model should return parseable JSON"
     assert not was_truncated
@@ -56,7 +57,10 @@ def test_chunking_roundtrip_with_real_tokenizer(model_and_tokenizer):
     _, tokenizer = model_and_tokenizer
     # Long clinical-style text that should split into multiple chunks
     text = "\n".join(
-        [f"Line {i}: clinical observation about patient status and vitals." for i in range(200)]
+        [
+            f"Line {i}: clinical observation about patient status and vitals."
+            for i in range(200)
+        ]
     )
 
     chunks = chunk_text(text, tokenizer, max_tokens=500, overlap=50)
@@ -104,4 +108,6 @@ def test_icd10_validation_on_real_extraction(model_and_tokenizer):
 
     _collect(annotated)
     assert flags, "annotate_icd10 should have added at least one validity flag"
-    assert any(f is True for f in flags), "At least one real ICD-10 code should validate"
+    assert any(f is True for f in flags), (
+        "At least one real ICD-10 code should validate"
+    )
