@@ -327,7 +327,7 @@ def _run_extraction(
         result = annotate_icd10(result, codes)
         invalid = count_invalid_codes(result)
         if invalid:
-            st.warning(f"{invalid} extracted ICD-10 code(s) not found in CMS 2026 set.")
+            st.warning(f"{invalid} extracted ICD-10 code(s) not found in CMS 2025 set.")
     else:
         st.warning("ICD-10 code list not loaded — validation skipped.")
 

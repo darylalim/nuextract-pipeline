@@ -33,10 +33,10 @@ The model (~4 GB) is downloaded automatically on first run.
 
 ## ICD-10 Data
 
-The repo ships with a small dev subset of ICD-10-CM codes (`data/icd10_cm_2026.json`) sufficient for the sample presets. For production use, generate the full ~74k-code set from the CMS source:
+The repo ships with a small dev subset of ICD-10-CM codes (`data/icd10_cm_2025.json`) sufficient for the sample presets. For production use, generate the full ~74k-code set from the CMS source:
 
 ```bash
-python scripts/generate_icd10_data.py path/to/icd10cm_order_2025.txt data/icd10_cm_2026.json
+python scripts/generate_icd10_data.py path/to/icd10cm_order_2025.txt data/icd10_cm_2025.json
 ```
 
 Source: [CMS 2025 ICD-10-CM](https://www.cms.gov/medicare/coding-billing/icd-10-codes/2025-icd-10-cm).
@@ -57,7 +57,7 @@ merging.py                # Field-aware per-chunk result merging
 validation.py             # ICD-10-CM code annotation
 presets.json              # 5 clinical extraction presets
 data/
-  icd10_cm_2026.json      # Bundled ICD-10-CM code set (dev subset)
+  icd10_cm_2025.json      # Bundled ICD-10-CM code set (dev subset)
 scripts/
   generate_icd10_data.py  # CMS source → JSON converter
 tests/
