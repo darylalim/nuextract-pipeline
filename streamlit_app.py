@@ -393,7 +393,31 @@ with st.spinner(f"Loading {MODEL_ID}..."):
     max_new_tokens,
 ) = _render_config()
 
-input_text = st.text_area("Enter text to extract from", height=150, key="text_input")
+tab_paste, tab_upload = st.tabs(["📋 Paste", "📎 Upload"])
+with tab_paste:
+    pasted = st.text_area(
+        "Enter text to extract from",
+        height=200,
+        key="text_input",
+    )
+with tab_upload:
+    uploaded_file = st.file_uploader(
+        "Upload a clinical note (.txt, .md)",
+        type=["txt", "md"],
+        key="file_input",
+    )
+    uploaded_text = (
+        uploaded_file.read().decode("utf-8", errors="replace") if uploaded_file else ""
+    )
+
+input_text = uploaded_text or pasted
+
+if input_text.strip():
+    n_tokens = len(tokenizer.encode(input_text))
+    overhead = len(tokenizer.encode(build_prompt(template_str, "")))
+    budget = max(0, MAX_INPUT_TOKENS - overhead)
+    color, msg = _describe_token_budget(n_tokens, budget)
+    st.caption(f":{color}[{msg}]")
 if st.button("Extract", type="primary", key="text_extract"):
     if not _has_config_errors(template_error, template_parsed):
         if not input_text.strip():
