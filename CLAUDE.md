@@ -16,7 +16,7 @@ uv run pytest                              # Run tests
 uv run pytest tests/test_file.py::test_name  # Run a single test
 ```
 
-No CI/CD configured.
+CI via GitHub Actions (`.github/workflows/ci.yml`): runs lint, format check, type check, and `pytest` on every push and PR to `main`. Uses `macos-14` (Apple Silicon) runners for MLX compatibility. E2E tests are excluded from CI — run manually with `uv run pytest -m e2e`.
 
 ## Architecture
 
