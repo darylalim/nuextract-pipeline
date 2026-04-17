@@ -399,8 +399,53 @@ def _collect_invalid_codes(result, path=""):
     return hits
 
 
+def _display_structured(result):
+    """Render an extraction result as structured fields instead of raw JSON.
+
+    - List-of-dict fields render as column tables; rows with
+      icd10_code_valid=False get red text.
+    - Nested dicts render as a subheader + st.json.
+    - Scalars render as disabled text inputs (copyable).
+    - Raw JSON stays available in a collapsed expander at the bottom.
+    """
+    invalid = _collect_invalid_codes(result)
+    if invalid:
+        with st.container(border=True):
+            st.error(f"{len(invalid)} invalid ICD-10 code(s):")
+            for path, code in invalid:
+                st.markdown(f"- `{code or '(empty)'}` at `{path}`")
+
+    for field, value in result.items():
+        label = field.replace("_", " ").title()
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            st.subheader(label)
+            headers = [k for k in value[0].keys() if k != "icd10_code_valid"]
+            header_cols = st.columns(len(headers))
+            for c, h in zip(header_cols, headers):
+                c.markdown(f"**{h.replace('_', ' ').title()}**")
+            for row in value:
+                bad = row.get("icd10_code_valid") is False
+                row_cols = st.columns(len(headers))
+                for c, h in zip(row_cols, headers):
+                    txt = str(row.get(h, ""))
+                    c.markdown(f":red[{txt}]" if bad else txt)
+        elif isinstance(value, dict):
+            st.subheader(label)
+            st.json(value)
+        elif isinstance(value, list):
+            st.subheader(label)
+            st.write(value if value else "_(empty)_")
+        else:
+            st.text_input(
+                label, value=str(value), disabled=True, key=f"structured_{field}"
+            )
+
+    with st.expander("Raw JSON"):
+        st.json(result)
+
+
 def _validate_and_display(result):
-    """Annotate ICD-10 codes, display warnings, render JSON, offer downloads."""
+    """Annotate ICD-10 codes, display warnings, render structured view, offer downloads."""
     codes = _load_icd10_codes()
     if codes:
         result = annotate_icd10(result, codes)
@@ -411,7 +456,7 @@ def _validate_and_display(result):
         st.warning("ICD-10 code list not loaded — validation skipped.")
         st.session_state["_icd10_warning_shown"] = True
 
-    st.json(result)
+    _display_structured(result)
 
     c1, c2 = st.columns(2)
     c1.download_button(

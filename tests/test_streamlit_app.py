@@ -868,6 +868,48 @@ def test_collect_invalid_codes_root_path(app):
     assert hits == [("root", "BAD")]
 
 
+# --- _display_structured ---
+
+
+def test_display_structured_shows_invalid_codes_banner(app):
+    result = {
+        "problems": [
+            {"icd10_code": "BAD", "icd10_code_valid": False, "diagnosis": "Test"}
+        ]
+    }
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock()]
+        mock_st.container.return_value.__enter__ = MagicMock()
+        mock_st.container.return_value.__exit__ = MagicMock()
+        mock_st.expander.return_value.__enter__ = MagicMock()
+        mock_st.expander.return_value.__exit__ = MagicMock()
+
+        app._display_structured(result)
+
+    # Error banner fired for the invalid code
+    assert any("invalid" in call[0][0].lower() for call in mock_st.error.call_args_list)
+
+
+def test_display_structured_no_banner_when_all_valid(app):
+    result = {
+        "problems": [
+            {"icd10_code": "I10", "icd10_code_valid": True, "diagnosis": "HTN"}
+        ]
+    }
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.container.return_value.__enter__ = MagicMock()
+        mock_st.container.return_value.__exit__ = MagicMock()
+        mock_st.expander.return_value.__enter__ = MagicMock()
+        mock_st.expander.return_value.__exit__ = MagicMock()
+
+        app._display_structured(result)
+
+    # No error banner
+    error_msgs = [c[0][0] for c in mock_st.error.call_args_list if c[0]]
+    assert not any("invalid" in m.lower() for m in error_msgs)
+
+
 # --- _result_to_csv ---
 
 
