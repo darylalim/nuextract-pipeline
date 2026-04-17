@@ -216,7 +216,7 @@ def test_render_config_detects_yaml(app):
         mock_st.selectbox.return_value = "Custom"
         mock_st.expander.return_value.__enter__ = MagicMock()
         mock_st.expander.return_value.__exit__ = MagicMock()
-        mock_st.info = MagicMock()
+        mock_st.button.return_value = False  # don't trigger accept branch
 
         result = app._render_config()
 
@@ -224,6 +224,33 @@ def test_render_config_detects_yaml(app):
     assert source_format == "yaml"
     assert template_error is None
     assert template_parsed == {"name": "", "age": ""}
+
+
+def test_render_config_yaml_accept_button_updates_session(app):
+    """Clicking 'Replace template with this JSON' writes converted JSON to session state."""
+    with patch("streamlit_app.st") as mock_st:
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.session_state = {
+            "template_input": 'name: ""\nage: ""',
+            "prev_preset": "Custom",
+        }
+        mock_st.text_area.return_value = 'name: ""\nage: ""'
+        mock_st.slider.return_value = 2048
+        mock_st.selectbox.return_value = "Custom"
+        mock_st.expander.return_value.__enter__ = MagicMock()
+        mock_st.expander.return_value.__exit__ = MagicMock()
+        mock_st.button.return_value = True  # user clicks accept
+
+        try:
+            app._render_config()
+        except Exception:
+            pass  # st.rerun() may raise
+
+        # session_state should now hold valid JSON, not YAML
+        assert json.loads(mock_st.session_state["template_input"]) == {
+            "name": "",
+            "age": "",
+        }
 
 
 def test_render_config_invalid_template(app):

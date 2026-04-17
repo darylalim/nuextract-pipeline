@@ -241,11 +241,21 @@ def _render_config():
         template_parsed, _ = validate_template(template_str)
     elif source_format in ("yaml", "pydantic", "pydantic_with_unknown"):
         fmt_label = "pydantic" if "pydantic" in source_format else source_format
-        st.info(f"Detected {fmt_label} template — will convert to JSON on extract.")
-        if source_format == "pydantic_with_unknown":
-            st.warning(
-                "Nested models simplified to empty string; edit the JSON template to add structure."
+        with st.expander(f"📄 Detected {fmt_label} — preview as JSON", expanded=True):
+            st.code(
+                json.dumps(json.loads(json_str), indent=2),
+                language="json",
             )
+            if source_format == "pydantic_with_unknown":
+                st.warning(
+                    "Nested models simplified to empty string. "
+                    "Edit the JSON below to add nested structure."
+                )
+            if st.button("Replace template with this JSON", key="accept_conversion"):
+                st.session_state["template_input"] = json.dumps(
+                    json.loads(json_str), indent=2
+                )
+                st.rerun()
         template_parsed, _ = validate_template(json_str)
     else:
         st.error(template_error)
