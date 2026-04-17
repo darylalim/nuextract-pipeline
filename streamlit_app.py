@@ -5,7 +5,7 @@ import json
 import logging
 import math
 import re
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
 
@@ -431,10 +431,13 @@ def _highlight_source(text, needles):
     consume longer super-phrases.
     """
     escaped = html_lib.escape(text)
-    unique = sorted(
-        {n for n in needles if isinstance(n, str) and len(n.strip()) >= 3},
-        key=len,
-        reverse=True,
+    unique: list[str] = cast(
+        list[str],
+        sorted(
+            {n for n in needles if isinstance(n, str) and len(n.strip()) >= 3},
+            key=len,
+            reverse=True,
+        ),
     )
     # Track already-marked character ranges to avoid double-wrapping
     marked_spans: list[tuple[int, int]] = []
