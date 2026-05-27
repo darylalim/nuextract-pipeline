@@ -264,22 +264,37 @@ with col_left:
 
     col_temp, col_reason, col_tokens = st.columns([2, 1, 2])
     with col_temp:
-        temperature = st.slider("Temperature", 0.0, 1.0, 0.0, 0.05)
+        temperature = st.slider(
+            "Temperature", 0.0, 1.0, 0.0, 0.05, key="temperature_slider"
+        )
     with col_reason:
-        reasoning = st.checkbox("Reasoning", value=False)
+        reasoning = st.checkbox("Reasoning", value=False, key="reasoning_checkbox")
     with col_tokens:
-        max_tokens = st.slider("Max tokens", 256, 8192, DEFAULT_MAX_TOKENS, 256)
+        max_tokens = st.slider(
+            "Max tokens", 256, 8192, DEFAULT_MAX_TOKENS, 256, key="max_tokens_slider"
+        )
 
     st.divider()
     col_b1, col_b2, col_b3 = st.columns(3)
     with col_b1:
         btn_extract = st.button(
-            "Extract JSON", type="primary", use_container_width=True
+            "Extract JSON",
+            type="primary",
+            use_container_width=True,
+            key="extract_button",
         )
     with col_b2:
-        btn_markdown = st.button("Convert to Markdown", use_container_width=True)
+        btn_markdown = st.button(
+            "Convert to Markdown",
+            use_container_width=True,
+            key="markdown_button",
+        )
     with col_b3:
-        btn_template = st.button("Generate template", use_container_width=True)
+        btn_template = st.button(
+            "Generate template",
+            use_container_width=True,
+            key="template_button",
+        )
 
 with col_right:
     st.subheader("Output")
