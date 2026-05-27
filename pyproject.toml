@@ -1,12 +1,13 @@
 [project]
 name = "nuextract-pipeline"
-version = "0.8.0"
-description = "Clinical structured extraction pipeline using NuExtract-1.5-MLX with chunking, ICD-10 validation, and Streamlit UI"
+version = "1.0.0"
+description = "Local document understanding via NuExtract3-MLX on Apple Silicon: structured extraction, document-to-markdown, and template generation in a Streamlit UI"
 requires-python = ">=3.12"
 dependencies = [
-    "mlx-lm>=0.20.0",
-    "pyyaml==6.0.2",
+    "mlx-vlm==0.4.4",
     "streamlit==1.54.0",
+    "torchvision==0.27.0",
+    "transformers==5.9.0",
 ]
 
 [dependency-groups]
@@ -15,9 +16,3 @@ dev = [
     "ruff==0.15.0",
     "ty==0.0.16",
 ]
-
-[tool.pytest.ini_options]
-markers = [
-    "e2e: end-to-end tests that load the real model (slow, opt-in via -m e2e)",
-]
-addopts = "-m 'not e2e'"

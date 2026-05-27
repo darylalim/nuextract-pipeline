@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -7,28 +6,36 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-TEST_TEMPLATE = json.dumps({"company": "", "revenue": ""})
-
 
 @pytest.fixture(scope="module")
 def app():
-    """Import streamlit_app with streamlit UI and model loading mocked."""
+    """Import streamlit_app with Streamlit + model loading mocked."""
     import streamlit as st
 
     with (
+        patch.object(st, "set_page_config"),
         patch.object(st, "title"),
+        patch.object(st, "subheader"),
+        patch.object(st, "markdown"),
+        patch.object(st, "divider"),
+        patch.object(st, "file_uploader", return_value=None),
         patch.object(st, "text_area", return_value=""),
+        patch.object(st, "image"),
+        patch.object(st, "slider", return_value=0.0),
+        patch.object(st, "checkbox", return_value=False),
         patch.object(st, "button", return_value=False),
         patch.object(st, "spinner"),
-        patch.object(st, "info"),
-        patch.object(st, "error"),
-        patch.object(st, "columns", return_value=[MagicMock(), MagicMock()]),
-        patch.object(st, "selectbox", return_value="Custom"),
-        patch.object(st, "slider", return_value=2048),
-        patch.object(st, "expander"),
+        patch.object(st, "empty", return_value=MagicMock()),
+        patch.object(
+            st,
+            "columns",
+            side_effect=lambda spec, **kw: [
+                MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
+            ],
+        ),
         patch.object(st, "cache_resource", side_effect=lambda f: f),
-        patch.object(st, "cache_data", side_effect=lambda f: f),
-        patch("streamlit_app.mlx_load", return_value=(MagicMock(), MagicMock())),
+        patch.object(st, "session_state", {}),
+        patch("streamlit_app.load_model", return_value=(MagicMock(), MagicMock())),
     ):
         sys.modules.pop("streamlit_app", None)
         import streamlit_app
@@ -37,1084 +44,323 @@ def app():
         sys.modules.pop("streamlit_app", None)
 
 
-# --- Constants ---
-
-
-def test_default_template_is_valid_json(app):
-    parsed = json.loads(app.DEFAULT_TEMPLATE)
-    assert isinstance(parsed, dict)
-    assert len(parsed) > 0
-
-
-def test_max_input_tokens_constant(app):
-    assert app.MAX_INPUT_TOKENS == 4_096
-
-
-def test_default_max_new_tokens_constant(app):
-    assert app.DEFAULT_MAX_NEW_TOKENS == 2048
-
-
-# --- validate_template ---
+# --- _validate_template ---
 
 
 def test_validate_template_valid(app):
-    parsed, error = app.validate_template('{"name": ""}')
-    assert parsed == {"name": ""}
+    parsed, error = app._validate_template('{"name": "string"}')
+    assert parsed == {"name": "string"}
     assert error is None
 
 
-def test_validate_template_invalid_json(app):
-    parsed, error = app.validate_template("not json {{{")
+def test_validate_template_empty(app):
+    parsed, error = app._validate_template("")
     assert parsed is None
-    assert error is not None
+    assert "empty" in error.lower()
 
 
-def test_validate_template_not_object(app):
-    parsed, error = app.validate_template("[1, 2, 3]")
+def test_validate_template_whitespace_only(app):
+    parsed, error = app._validate_template("   \n  ")
+    assert parsed is None
+    assert "empty" in error.lower()
+
+
+def test_validate_template_invalid_json(app):
+    parsed, error = app._validate_template("not json {{{")
+    assert parsed is None
+    assert "invalid json" in error.lower()
+
+
+def test_validate_template_non_dict(app):
+    parsed, error = app._validate_template("[1, 2, 3]")
     assert parsed is None
     assert "object" in error.lower()
 
 
 def test_validate_template_empty_object(app):
-    parsed, error = app.validate_template("{}")
+    parsed, error = app._validate_template("{}")
     assert parsed is None
     assert "empty" in error.lower()
 
 
-# --- build_prompt ---
+# --- _save_uploaded_image ---
 
 
-def test_build_prompt_format(app):
-    prompt = app.build_prompt('{"name": ""}', "John is 30 years old.")
-    assert "<|input|>" in prompt
-    assert "### Template:" in prompt
-    assert "### Text:" in prompt
-    assert "<|output|>" in prompt
-    assert "John is 30 years old." in prompt
-    assert '"name": ""' in prompt
+def test_save_uploaded_image_none_returns_none(app):
+    assert app._save_uploaded_image(None) is None
 
 
-def test_build_prompt_pretty_prints_template(app):
-    prompt = app.build_prompt('{"a":"","b":""}', "text")
-    # Template should be indented with 4 spaces (json.dumps indent=4)
-    assert '    "a": ""' in prompt
+def test_save_uploaded_image_persists_bytes_to_temp(app, tmp_path):
+    fake_upload = MagicMock()
+    fake_upload.name = "test.png"
+    fake_upload.getvalue.return_value = b"\x89PNG\r\n\x1a\n"  # PNG header
 
+    path = app._save_uploaded_image(fake_upload)
+    assert path is not None
+    assert Path(path).exists()
+    assert Path(path).suffix == ".png"
+    assert Path(path).read_bytes() == b"\x89PNG\r\n\x1a\n"
+    Path(path).unlink()
 
-# --- _has_config_errors ---
 
+def test_save_uploaded_image_falls_back_when_no_extension(app):
+    fake_upload = MagicMock()
+    fake_upload.name = "no_extension"
+    fake_upload.getvalue.return_value = b"data"
 
-def test_has_config_errors_template_error(app):
-    with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors("bad json", None) is True
-        mock_st.error.assert_called_once_with("Fix template: bad json")
+    path = app._save_uploaded_image(fake_upload)
+    assert Path(path).suffix == ".png"
+    Path(path).unlink()
 
 
-def test_has_config_errors_no_errors(app):
-    with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors(None, {"a": ""}) is False
-        mock_st.error.assert_not_called()
+def test_save_uploaded_image_preserves_jpg_suffix(app):
+    """Non-PNG extensions (jpg, webp, jpeg) must be preserved so mlx-vlm's
+    image loader can pick the right codec."""
+    fake_upload = MagicMock()
+    fake_upload.name = "photo.jpg"
+    fake_upload.getvalue.return_value = b"\xff\xd8\xff"  # JPEG magic
 
+    path = app._save_uploaded_image(fake_upload)
+    assert Path(path).suffix == ".jpg"
+    Path(path).unlink()
 
-def test_has_config_errors_no_template_parsed(app):
-    with patch("streamlit_app.st") as mock_st:
-        assert app._has_config_errors(None, None) is True
-        mock_st.error.assert_called_once()
 
+def test_save_uploaded_image_caches_by_file_id(app):
+    """Repeated calls with the same upload (same file_id) reuse the cached
+    temp file — no re-write on every Streamlit rerun."""
+    import streamlit as st
 
-# --- _get_effective_template ---
+    st.session_state.clear()
 
+    fake_upload = MagicMock()
+    fake_upload.name = "doc.png"
+    fake_upload.file_id = "stable-id-123"
+    fake_upload.getvalue.return_value = b"\x89PNG"
 
-@pytest.mark.parametrize("fmt", ["yaml", "pydantic", "pydantic_with_unknown"])
-def test_get_effective_template_converts_non_json(app, fmt):
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.session_state = {}
-        result = app._get_effective_template('{"name": ""}', fmt, "original")
-        assert result == '{"name": ""}'
-        assert mock_st.session_state["template_input"] == '{"name": ""}'
+    path1 = app._save_uploaded_image(fake_upload)
+    path2 = app._save_uploaded_image(fake_upload)
 
+    assert path1 == path2
+    assert Path(path1).exists()
+    # Bytes written exactly once across the two calls
+    assert fake_upload.getvalue.call_count == 1
+    Path(path1).unlink()
 
-@pytest.mark.parametrize("fmt", ["json", None])
-def test_get_effective_template_returns_original(app, fmt):
-    result = app._get_effective_template('{"name": ""}', fmt, "original")
-    assert result == "original"
 
+def test_save_uploaded_image_cleans_up_previous_on_new_upload(app):
+    """A new upload (different file_id) deletes the previous temp file
+    before writing the new one."""
+    import streamlit as st
 
-# --- _describe_token_budget ---
+    st.session_state.clear()
 
+    first = MagicMock()
+    first.name = "first.png"
+    first.file_id = "id-1"
+    first.getvalue.return_value = b"AAA"
 
-def test_describe_token_budget_under_limit(app):
-    color, msg = app._describe_token_budget(n_tokens=100, budget=4000)
-    assert color == "green"
-    assert "100" in msg and "4,000" in msg
-    assert "single chunk" in msg.lower()
+    second = MagicMock()
+    second.name = "second.png"
+    second.file_id = "id-2"
+    second.getvalue.return_value = b"BBB"
 
+    path1 = app._save_uploaded_image(first)
+    assert Path(path1).exists()
 
-def test_describe_token_budget_at_limit(app):
-    color, msg = app._describe_token_budget(n_tokens=4000, budget=4000)
-    assert color == "green"
+    path2 = app._save_uploaded_image(second)
+    assert path2 != path1
+    assert not Path(path1).exists()  # Previous temp file cleaned up
+    assert Path(path2).exists()
+    Path(path2).unlink()
 
 
-def test_describe_token_budget_over_limit(app):
-    color, msg = app._describe_token_budget(n_tokens=10_000, budget=4000)
-    assert color == "orange"
-    assert "10,000" in msg
-    assert "chunk" in msg.lower()
-
-
-def test_describe_token_budget_over_limit_reports_chunk_count(app):
-    # chunk step = DEFAULT_CHUNK_TOKENS - DEFAULT_OVERLAP_TOKENS = 3500 - 200 = 3300
-    # 10000 / 3300 = 3.03 → ceil = 4
-    _, msg = app._describe_token_budget(n_tokens=10_000, budget=4000)
-    assert "4" in msg  # estimated chunk count
-
-
-# --- _render_config ---
-
-
-def test_render_config_returns_all_fields(app):
-    """_render_config returns a tuple of (template_str, json_str, source_format, template_error, template_parsed, max_new_tokens)."""
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {
-            "template_input": '{"name": ""}',
-            "prev_preset": "Custom",
-        }
-        mock_st.text_area.return_value = '{"name": ""}'
-        mock_st.slider.return_value = 2048
-        mock_st.selectbox.return_value = "Custom"
-        mock_st.expander.return_value.__enter__ = MagicMock()
-        mock_st.expander.return_value.__exit__ = MagicMock()
-
-        result = app._render_config()
-
-    assert len(result) == 6
-    (
-        template_str,
-        json_str,
-        source_format,
-        template_error,
-        template_parsed,
-        max_new_tokens,
-    ) = result
-    assert template_str == '{"name": ""}'
-    assert source_format == "json"
-    assert template_error is None
-    assert template_parsed == {"name": ""}
-    assert max_new_tokens == 2048
-
-
-def test_render_config_detects_yaml(app):
-    """_render_config detects YAML templates and returns converted JSON."""
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {
-            "template_input": 'name: ""\nage: ""',
-            "prev_preset": "Custom",
-        }
-        mock_st.text_area.return_value = 'name: ""\nage: ""'
-        mock_st.slider.return_value = 2048
-        mock_st.selectbox.return_value = "Custom"
-        mock_st.expander.return_value.__enter__ = MagicMock()
-        mock_st.expander.return_value.__exit__ = MagicMock()
-        mock_st.button.return_value = False  # don't trigger accept branch
-
-        result = app._render_config()
-
-    _, json_str, source_format, template_error, template_parsed, _ = result
-    assert source_format == "yaml"
-    assert template_error is None
-    assert template_parsed == {"name": "", "age": ""}
-
-
-def test_render_config_yaml_accept_button_updates_session(app):
-    """Clicking 'Replace template with this JSON' writes converted JSON to session state."""
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {
-            "template_input": 'name: ""\nage: ""',
-            "prev_preset": "Custom",
-        }
-        mock_st.text_area.return_value = 'name: ""\nage: ""'
-        mock_st.slider.return_value = 2048
-        mock_st.selectbox.return_value = "Custom"
-        mock_st.expander.return_value.__enter__ = MagicMock()
-        mock_st.expander.return_value.__exit__ = MagicMock()
-        mock_st.button.return_value = True  # user clicks accept
-
-        try:
-            app._render_config()
-        except Exception:
-            pass  # st.rerun() may raise
-
-        # session_state should now hold valid JSON, not YAML
-        assert json.loads(mock_st.session_state["template_input"]) == {
-            "name": "",
-            "age": "",
-        }
-
-
-def test_render_config_invalid_template(app):
-    """_render_config returns error for invalid template."""
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {"template_input": "not valid", "prev_preset": "Custom"}
-        mock_st.text_area.return_value = "not valid"
-        mock_st.slider.return_value = 2048
-        mock_st.selectbox.return_value = "Custom"
-        mock_st.expander.return_value.__enter__ = MagicMock()
-        mock_st.expander.return_value.__exit__ = MagicMock()
-        mock_st.error = MagicMock()
-
-        result = app._render_config()
-
-    _, _, source_format, template_error, template_parsed, _ = result
-    assert source_format is None
-    assert template_error is not None
-    assert template_parsed is None
-
-
-def test_render_config_preset_change_updates_session(app):
-    """When preset changes, _render_config updates session state and reruns."""
-    presets = [
-        {"name": "Person", "template": {"first_name": ""}, "sample_text": "Maria"}
-    ]
-
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.session_state = {
-            "template_input": '{"old": ""}',
-            "prev_preset": "Custom",
-        }
-        mock_st.selectbox.return_value = "Person"
-        mock_st.slider.return_value = 2048
-
-        with patch.object(app, "load_presets", return_value=presets):
-            try:
-                app._render_config()
-            except Exception:
-                pass  # st.rerun() raises in test context
-
-        assert mock_st.session_state["prev_preset"] == "Person"
-        assert '"first_name"' in mock_st.session_state["template_input"]
-        assert mock_st.session_state["text_input"] == "Maria"
-
-
-# --- _run_extraction ---
-
-
-def test_run_extraction_short_input(app):
-    """Short input takes single-chunk path, displays result."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        app._run_extraction(
-            "short text",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            {"company": "", "revenue": ""},
-        )
-    mock_st.json.assert_called_once()
-    mock_st.info.assert_not_called()
-
-
-def test_run_extraction_long_input_chunks_and_merges(app):
-    """Long input triggers chunking, merging, and displays merged result."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    # First encode call (build_prompt overhead): 20 tokens
-    # Second encode call (text tokens): 5000 tokens (exceeds 4096 - 20)
-    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
-
-    with (
-        patch(
-            "streamlit_app.chunk_text", return_value=["chunk1", "chunk2"]
-        ) as mock_chunk,
-        patch.object(
-            app,
-            "extract",
-            side_effect=[
-                ({"company": "Acme"}, False),
-                ({"revenue": "1M"}, False),
-            ],
-        ),
-        patch(
-            "streamlit_app.merge_results",
-            return_value={"company": "Acme", "revenue": "1M"},
-        ) as mock_merge,
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.progress.return_value = MagicMock()
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        template_parsed = {"company": "", "revenue": ""}
-        app._run_extraction(
-            "very long text...",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            template_parsed,
-        )
-    mock_chunk.assert_called_once()
-    mock_merge.assert_called_once()
-    mock_st.json.assert_called_once()
-
-
-def test_run_extraction_partial_chunk_failure(app):
-    """Some chunks fail: warning shown, partial result displayed."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
-
-    with (
-        patch("streamlit_app.chunk_text", return_value=["c1", "c2", "c3"]),
-        patch.object(
-            app,
-            "extract",
-            side_effect=[
-                ({"company": "Acme"}, False),
-                (None, False),
-                ({"revenue": "1M"}, False),
-            ],
-        ),
-        patch(
-            "streamlit_app.merge_results",
-            return_value={"company": "Acme", "revenue": "1M"},
-        ),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.progress.return_value = MagicMock()
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        app._run_extraction(
-            "long text",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            {"company": "", "revenue": ""},
-        )
-    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
-    assert any("2 of 3" in w for w in warnings)
-
-
-def test_run_extraction_all_chunks_fail(app):
-    """All chunks fail: error shown, no JSON displayed."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
-
-    with (
-        patch("streamlit_app.chunk_text", return_value=["c1", "c2"]),
-        patch.object(app, "extract", return_value=(None, False)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.progress.return_value = MagicMock()
-        app._run_extraction(
-            "long text",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            {"company": "", "revenue": ""},
-        )
-    mock_st.error.assert_called()
-    mock_st.json.assert_not_called()
-
-
-def test_run_extraction_icd10_validation(app):
-    """ICD-10 codes in result get validated and warning shown for invalid."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    result_with_code = {"diagnosis": "HTN", "icd10_code": "FAKE.99"}
-
-    with (
-        patch.object(app, "extract", return_value=(result_with_code, False)),
-        patch.object(app, "_load_icd10_codes", return_value={"I10", "E119"}),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        app._run_extraction(
-            "text",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            {"diagnosis": "", "icd10_code": ""},
-        )
-    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
-    assert any("ICD-10" in w for w in warnings)
-
-
-def test_run_extraction_icd10_missing_data(app):
-    """Missing ICD-10 data: validation skipped warning shown once per session."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.session_state = {}
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
-        )
-    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
-    assert any("validation skipped" in w.lower() for w in warnings)
-
-
-def test_run_extraction_icd10_missing_warning_suppressed_after_first(app):
-    """Missing ICD-10 data: warning shown only once, suppressed on subsequent calls."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    session_state = {}
-    with (
-        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.session_state = session_state
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        # First call — warning should fire and set the flag
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
-        )
-        # Second call — warning should NOT fire again
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
-        )
-    # Count of "validation skipped" warnings across both calls should be exactly 1
-    skipped_count = sum(
-        1
-        for call in mock_st.warning.call_args_list
-        if "validation skipped" in call[0][0].lower()
+# --- Constants ---
+
+
+def test_default_template_is_valid_json(app):
+    import json
+
+    parsed = json.loads(app.DEFAULT_TEMPLATE)
+    assert isinstance(parsed, dict)
+    assert len(parsed) > 0
+
+
+def test_template_gen_guidance_mentions_json(app):
+    assert "JSON" in app.TEMPLATE_GEN_GUIDANCE
+
+
+# --- _render_output_pane behavior ---
+
+
+def test_render_output_pane_no_reasoning_renders_output_as_json(app):
+    output_ph = MagicMock()
+    reasoning_ph = MagicMock()
+    app._render_output_pane(
+        output_ph,
+        reasoning_ph,
+        accumulated='{"k": 1}',
+        reasoning_enabled=False,
+        is_structured=True,
     )
-    assert skipped_count == 1
-    assert session_state.get("_icd10_warning_shown") is True
-
-
-def test_run_extraction_valueerror_single_chunk(app):
-    """ValueError in single-chunk path displays error."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", side_effect=ValueError("Input too long")),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
-        )
-    mock_st.error.assert_called_once_with("Input too long")
-
-
-def test_run_extraction_truncated_chunks_warning(app):
-    """Truncated chunks show warning with chunk numbers."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
-
-    with (
-        patch("streamlit_app.chunk_text", return_value=["c1", "c2"]),
-        patch.object(
-            app,
-            "extract",
-            side_effect=[
-                ({"company": "Acme"}, True),
-                ({"revenue": "1M"}, False),
-            ],
-        ),
-        patch(
-            "streamlit_app.merge_results",
-            return_value={"company": "Acme", "revenue": "1M"},
-        ),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.progress.return_value = MagicMock()
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        app._run_extraction(
-            "long text",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            {"company": "", "revenue": ""},
-        )
-    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
-    assert any("truncated" in w.lower() for w in warnings)
-
-
-def test_run_extraction_runtimeerror_single_chunk(app):
-    """RuntimeError in single-chunk path displays error with 'Runtime error:' prefix."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", side_effect=RuntimeError("memory issue")),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
-        )
-    mock_st.error.assert_called_once()
-    assert "runtime error" in mock_st.error.call_args[0][0].lower()
-
-
-def test_run_extraction_json_parse_failure_single_chunk(app):
-    """Single-chunk extraction returning None (JSON parse failure) shows error."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", return_value=(None, False)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
-        )
-    mock_st.error.assert_called()
-    error_msgs = [call[0][0].lower() for call in mock_st.error.call_args_list]
-    assert any("json" in msg for msg in error_msgs)
-    mock_st.json.assert_not_called()
-
-
-def test_run_extraction_truncated_single_chunk(app):
-    """Truncated single-chunk result shows warning."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", return_value=({"company": "Acme"}, True)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch("streamlit_app.st") as mock_st,
-    ):
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        app._run_extraction(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
-        )
-    warnings = [call[0][0].lower() for call in mock_st.warning.call_args_list]
-    assert any("truncated" in w for w in warnings)
-
-
-# --- extract ---
-
-
-def test_extract_returns_parsed_dict(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with patch("streamlit_app.mlx_generate", return_value='{"company": "Acme"}'):
-        result, _ = app.extract("some text", mock_model, mock_tokenizer, TEST_TEMPLATE)
-    assert result == {"company": "Acme"}
-
-
-def test_extract_json_failure_returns_none(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with patch("streamlit_app.mlx_generate", return_value="not valid json {{{"):
-        result, _ = app.extract("some text", mock_model, mock_tokenizer, TEST_TEMPLATE)
-    assert result is None
-
-
-def test_extract_strips_end_output_marker(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with patch(
-        "streamlit_app.mlx_generate",
-        return_value='{"company": "Acme"}<|end-output|>',
-    ):
-        result, _ = app.extract("some text", mock_model, mock_tokenizer, TEST_TEMPLATE)
-    assert result == {"company": "Acme"}
-
-
-def test_extract_over_token_limit_raises(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(5_000))
-
-    with pytest.raises(ValueError, match="5000.*4096"):
-        app.extract("some text", mock_model, mock_tokenizer, TEST_TEMPLATE)
-
-
-def test_extract_at_token_limit_succeeds(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(4_096))
-
-    with patch("streamlit_app.mlx_generate", return_value='{"company": "Acme"}'):
-        result, _ = app.extract("some text", mock_model, mock_tokenizer, TEST_TEMPLATE)
-    assert result == {"company": "Acme"}
-
-
-def test_extract_detects_truncation(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    # First call: input token count (under limit)
-    # Second call: response token count (>= max_new_tokens)
-    mock_tokenizer.encode.side_effect = [list(range(50)), list(range(100))]
-
-    with patch("streamlit_app.mlx_generate", return_value='{"company": "Acme"}'):
-        _, was_truncated = app.extract(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, max_new_tokens=100
-        )
-    assert was_truncated is True
-
-
-def test_extract_no_truncation(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    # First call: input token count; Second call: response token count (< max)
-    mock_tokenizer.encode.side_effect = [list(range(50)), list(range(10))]
-
-    with patch("streamlit_app.mlx_generate", return_value='{"company": "Acme"}'):
-        _, was_truncated = app.extract(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, max_new_tokens=100
-        )
-    assert was_truncated is False
-
-
-def test_extract_passes_correct_params_to_generate(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with patch(
-        "streamlit_app.mlx_generate", return_value='{"company": "Acme"}'
-    ) as mock_gen:
-        app.extract(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, max_new_tokens=512
-        )
-    mock_gen.assert_called_once()
-    call_kwargs = mock_gen.call_args
-    assert call_kwargs[1]["max_tokens"] == 512
-    assert call_kwargs[1]["verbose"] is False
-
-
-def test_extract_uses_custom_max_new_tokens(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with patch(
-        "streamlit_app.mlx_generate", return_value='{"company": "Acme"}'
-    ) as mock_gen:
-        app.extract(
-            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, max_new_tokens=512
-        )
-    assert mock_gen.call_args[1]["max_tokens"] == 512
-
-
-def test_extract_builds_correct_prompt(app):
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with patch(
-        "streamlit_app.mlx_generate", return_value='{"company": "Acme"}'
-    ) as mock_gen:
-        app.extract("test input", mock_model, mock_tokenizer, TEST_TEMPLATE)
-    prompt = mock_gen.call_args[1]["prompt"]
-    assert "<|input|>" in prompt
-    assert "### Template:" in prompt
-    assert "### Text:" in prompt
-    assert "test input" in prompt
-    assert "<|output|>" in prompt
-
-
-# --- load_model ---
-
-
-def test_load_model_uses_model_id(app):
-    with patch(
-        "streamlit_app.mlx_load", return_value=(MagicMock(), MagicMock())
-    ) as mock_load:
-        app.load_model()
-    mock_load.assert_called_once_with(app.MODEL_ID)
-
-
-# --- load_presets ---
-
-
-def test_load_presets_valid_file(app, tmp_path):
-    presets_data = [
-        {
-            "name": "Test",
-            "template": {"field": ""},
-            "sample_text": "test input",
-        }
-    ]
-    f = tmp_path / "presets.json"
-    f.write_text(json.dumps(presets_data))
-    result = app.load_presets(str(f))
-    assert len(result) == 1
-    assert result[0]["name"] == "Test"
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        None,
-        "not json {{{",
-        '{"name": "Person"}',
-        '[{"name": "Bad"}, {"invalid": true}]',
-        "[]",
-    ],
-)
-def test_load_presets_fallback(app, tmp_path, content):
-    if content is None:
-        path = str(tmp_path / "nonexistent.json")
-    else:
-        f = tmp_path / "presets.json"
-        f.write_text(content)
-        path = str(f)
-    result = app.load_presets(path)
-    assert len(result) == 1
-    assert result[0]["name"] == "SOAP Note"
-
-
-def test_load_presets_skips_invalid_entries(app, tmp_path):
-    presets_data = [
-        {"name": "Good", "template": {"f": ""}, "sample_text": "x"},
-        {"name": "Bad"},
-        {"name": "Also Good", "template": {"g": ""}, "sample_text": "y"},
-    ]
-    f = tmp_path / "presets.json"
-    f.write_text(json.dumps(presets_data))
-    result = app.load_presets(str(f))
-    assert len(result) == 2
-    assert result[0]["name"] == "Good"
-    assert result[1]["name"] == "Also Good"
-
-
-def test_load_presets_actual_file(app):
-    presets_path = str(Path(__file__).resolve().parent.parent / "presets.json")
-    result = app.load_presets(presets_path)
-    assert len(result) == 5
-    names = {p["name"] for p in result}
-    assert names == {
-        "SOAP Note",
-        "Discharge Summary",
-        "H&P",
-        "Medication Reconciliation",
-        "Problem List",
-    }
-    for p in result:
-        assert isinstance(p["template"], dict) and p["template"]
-        assert isinstance(p["sample_text"], str) and p["sample_text"]
-
-
-# --- _collect_invalid_codes ---
-
-
-def test_collect_invalid_codes_no_invalid(app):
-    result = {"problems": [{"icd10_code": "I10", "icd10_code_valid": True}]}
-    assert app._collect_invalid_codes(result) == []
-
-
-def test_collect_invalid_codes_single_invalid(app):
-    result = {"problems": [{"icd10_code": "FAKE.9", "icd10_code_valid": False}]}
-    hits = app._collect_invalid_codes(result)
-    assert hits == [("problems[0]", "FAKE.9")]
-
-
-def test_collect_invalid_codes_nested_list(app):
-    result = {
-        "assessment": [
-            {"icd10_code": "I10", "icd10_code_valid": True},
-            {"icd10_code": "BAD1", "icd10_code_valid": False},
-            {"icd10_code": "BAD2", "icd10_code_valid": False},
-        ]
-    }
-    hits = app._collect_invalid_codes(result)
-    assert len(hits) == 2
-    codes = {c for _, c in hits}
-    assert codes == {"BAD1", "BAD2"}
-
-
-def test_collect_invalid_codes_empty_code(app):
-    result = {"icd10_code": "", "icd10_code_valid": False}
-    hits = app._collect_invalid_codes(result)
-    assert len(hits) == 1
-    _, code = hits[0]
-    assert code == ""
-
-
-def test_collect_invalid_codes_root_path(app):
-    """Top-level invalid dict is reported with path='root'."""
-    result = {"icd10_code": "BAD", "icd10_code_valid": False}
-    hits = app._collect_invalid_codes(result)
-    assert hits == [("root", "BAD")]
-
-
-# --- _extract_strings ---
-
-
-def test_extract_strings_scalar(app):
-    assert app._extract_strings("hello") == ["hello"]
-
-
-def test_extract_strings_skips_empty(app):
-    assert app._extract_strings("") == []
-    assert app._extract_strings("   ") == []
-
-
-def test_extract_strings_dict_flattens(app):
-    val = {"name": "Alice", "age": "30"}
-    assert sorted(app._extract_strings(val)) == ["30", "Alice"]
-
-
-def test_extract_strings_skips_validity_flag(app):
-    val = {"icd10_code": "I10", "icd10_code_valid": True}
-    # The boolean should not become a string
-    assert app._extract_strings(val) == ["I10"]
-
-
-def test_extract_strings_nested(app):
-    val = {
-        "problems": [
-            {"diagnosis": "HTN", "icd10_code": "I10"},
-            {"diagnosis": "DM2", "icd10_code": "E11.9"},
-        ]
-    }
-    out = app._extract_strings(val)
-    assert set(out) == {"HTN", "I10", "DM2", "E11.9"}
-
-
-# --- _display_structured ---
-
-
-def test_display_structured_shows_invalid_codes_banner(app):
-    result = {
-        "problems": [
-            {"icd10_code": "BAD", "icd10_code_valid": False, "diagnosis": "Test"}
-        ]
-    }
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock()]
-        mock_st.container.return_value.__enter__ = MagicMock()
-        mock_st.container.return_value.__exit__ = MagicMock()
-        mock_st.expander.return_value.__enter__ = MagicMock()
-        mock_st.expander.return_value.__exit__ = MagicMock()
-
-        app._display_structured(result)
-
-    # Error banner fired for the invalid code
-    assert any("invalid" in call[0][0].lower() for call in mock_st.error.call_args_list)
-
-
-def test_display_structured_no_banner_when_all_valid(app):
-    result = {
-        "problems": [
-            {"icd10_code": "I10", "icd10_code_valid": True, "diagnosis": "HTN"}
-        ]
-    }
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.container.return_value.__enter__ = MagicMock()
-        mock_st.container.return_value.__exit__ = MagicMock()
-        mock_st.expander.return_value.__enter__ = MagicMock()
-        mock_st.expander.return_value.__exit__ = MagicMock()
-
-        app._display_structured(result)
-
-    # No error banner
-    error_msgs = [c[0][0] for c in mock_st.error.call_args_list if c[0]]
-    assert not any("invalid" in m.lower() for m in error_msgs)
-
-
-# --- _validate_and_display end-to-end ---
-
-
-def test_validate_and_display_highlights_picked_field(app):
-    """End-to-end: selectbox 'All fields' → source pane renders <mark> tags."""
-    with (
-        patch("streamlit_app.st") as mock_st,
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-    ):
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.selectbox.return_value = "All fields"
-        mock_st.session_state = {}
-
-        app._validate_and_display({"name": "Alice"}, "patient Alice here")
-
-    # st.markdown is called with the highlighted HTML; verify <mark>Alice</mark>
-    # appears in at least one call's first positional argument.
-    md_args = [c[0][0] for c in mock_st.markdown.call_args_list if c[0]]
-    assert any("<mark>Alice</mark>" in arg for arg in md_args), (
-        f"Expected <mark>Alice</mark> in one of the st.markdown calls. "
-        f"Got args: {md_args}"
+    # Structured + valid JSON → renders via code(...)
+    output_ph.code.assert_called_once()
+    args, kwargs = output_ph.code.call_args
+    assert "1" in args[0]
+    assert kwargs.get("language") == "json"
+
+
+def test_render_output_pane_waiting_for_think_close(app):
+    output_ph = MagicMock()
+    reasoning_ph = MagicMock()
+    app._render_output_pane(
+        output_ph,
+        reasoning_ph,
+        accumulated="still thinking",
+        reasoning_enabled=True,
+        is_structured=True,
     )
+    # No </think> yet → output pane shows the waiting caption
+    output_ph.caption.assert_called_once()
+    assert "</think>" in output_ph.caption.call_args[0][0]
 
 
-def test_validate_and_display_clears_stale_highlight_field(app):
-    """Stale highlight_field from a previous result's schema is cleared, not crashed."""
-    with (
-        patch("streamlit_app.st") as mock_st,
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-    ):
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        mock_st.selectbox.return_value = "All fields"
-        # Pretend user previously picked "assessment" on a prior result
-        mock_st.session_state = {"highlight_field": "assessment"}
-
-        # New result has a different schema (no "assessment" field)
-        app._validate_and_display({"name": "Alice"}, "source text")
-
-    # Session state must have been cleared before st.selectbox ran,
-    # so "highlight_field" is either absent or refers to a valid new option.
-    final_value = mock_st.session_state.get("highlight_field")
-    assert final_value in (None, "All fields", "name"), (
-        f"Stale 'assessment' value should have been cleared. Got: {final_value}"
+def test_render_output_pane_markdown_mode_uses_markdown(app):
+    output_ph = MagicMock()
+    reasoning_ph = MagicMock()
+    app._render_output_pane(
+        output_ph,
+        reasoning_ph,
+        accumulated="# Heading\n\nbody text",
+        reasoning_enabled=False,
+        is_structured=False,
     )
+    output_ph.markdown.assert_called_once()
+    assert "Heading" in output_ph.markdown.call_args[0][0]
 
 
-# --- _result_to_csv ---
+def test_render_output_pane_reasoning_completed_populates_both_panes(app):
+    """Reasoning enabled AND </think> arrived: trace goes to reasoning pane,
+    answer goes to output pane."""
+    output_ph = MagicMock()
+    reasoning_ph = MagicMock()
+    app._render_output_pane(
+        output_ph,
+        reasoning_ph,
+        accumulated='reasoning text here</think>{"k": 1}',
+        reasoning_enabled=True,
+        is_structured=True,
+    )
+    # Reasoning text in reasoning_placeholder
+    reasoning_ph.markdown.assert_called_once()
+    assert "reasoning text here" in reasoning_ph.markdown.call_args[0][0]
+    # JSON answer in output_placeholder
+    output_ph.code.assert_called_once()
+    assert "1" in output_ph.code.call_args[0][0]
 
 
-def test_result_to_csv_flat_scalars_only_returns_none(app):
-    """Result with only scalar fields has no list-of-dict rows to flatten."""
-    result = {"chief_complaint": "chest pain", "hpi": "acute onset"}
-    assert app._result_to_csv(result) is None
+def test_render_output_pane_structured_mode_non_json_falls_back_to_markdown(app):
+    """When structured mode is requested but the model returns plain text
+    (extract_answer_block falls back to stripped text), render as markdown
+    instead of crashing."""
+    output_ph = MagicMock()
+    reasoning_ph = MagicMock()
+    app._render_output_pane(
+        output_ph,
+        reasoning_ph,
+        accumulated="model could not produce JSON for this document",
+        reasoning_enabled=False,
+        is_structured=True,
+    )
+    # Non-JSON output → markdown render, not code block
+    output_ph.markdown.assert_called_once()
+    output_ph.code.assert_not_called()
 
 
-def test_result_to_csv_single_list_field(app):
-    result = {
-        "medications": [
-            {"name": "lisinopril", "dose": "20mg"},
-            {"name": "atorvastatin", "dose": "40mg"},
-        ]
-    }
-    csv_text = app._result_to_csv(result)
-    assert csv_text is not None
-    lines = csv_text.strip().splitlines()
-    assert lines[0] == "section,name,dose"
-    assert "medications,lisinopril,20mg" in lines[1]
-    assert "medications,atorvastatin,40mg" in lines[2]
+def test_render_output_pane_reasoning_disabled_caption(app):
+    """With always-render layout, the reasoning pane shows a 'disabled' caption
+    when reasoning is off — no empty whitespace between the headers."""
+    output_ph = MagicMock()
+    reasoning_ph = MagicMock()
+    app._render_output_pane(
+        output_ph,
+        reasoning_ph,
+        accumulated='{"k": 1}',
+        reasoning_enabled=False,
+        is_structured=True,
+    )
+    reasoning_ph.caption.assert_called_once()
+    assert "disabled" in reasoning_ph.caption.call_args[0][0].lower()
 
 
-def test_result_to_csv_multiple_list_fields_merged(app):
-    result = {
-        "medications": [{"name": "aspirin", "dose": "325mg"}],
-        "problems": [{"diagnosis": "HTN", "icd10_code": "I10"}],
-    }
-    csv_text = app._result_to_csv(result)
-    assert csv_text.splitlines()[0] == "section,name,dose,diagnosis,icd10_code"
+# --- _render_download_button ---
 
 
-def test_result_to_csv_strips_validation_flag(app):
-    """icd10_code_valid sibling columns should not leak into CSV."""
-    result = {
-        "problems": [
-            {"diagnosis": "HTN", "icd10_code": "I10", "icd10_code_valid": True}
-        ]
-    }
-    csv_text = app._result_to_csv(result)
-    assert "icd10_code_valid" not in csv_text
-    assert "True" not in csv_text
+def test_render_download_button_extract_mode_emits_clean_json(app):
+    """Extract mode → extract_answer_block is applied, label says 'Download JSON',
+    filename is extraction.json, mime is application/json."""
+    import streamlit as st
 
-
-def test_result_to_csv_skips_non_dict_items(app):
-    """Mixed list with dict + non-dict items should yield rows only for dicts, not crash."""
-    result = {
-        "items": [
-            {"name": "aspirin", "dose": "325mg"},
-            "stray string",
-            {"name": "ibuprofen", "dose": "400mg"},
-        ]
-    }
-    csv_text = app._result_to_csv(result)
-    assert csv_text is not None
-    lines = csv_text.strip().splitlines()
-    # Header + two dict rows (the "stray string" is skipped)
-    assert len(lines) == 3
-    assert "aspirin" in lines[1]
-    assert "ibuprofen" in lines[2]
-    assert "stray string" not in csv_text
-
-
-def test_run_extraction_passes_input_text_to_display(app):
-    """The side-by-side view receives both result and input_text."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = list(range(50))
-
-    with (
-        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
-        patch.object(app, "_load_icd10_codes", return_value=set()),
-        patch.object(app, "_validate_and_display") as mock_display,
-        patch("streamlit_app.st"),
-    ):
-        app._run_extraction(
-            "patient history text",
-            mock_model,
-            mock_tokenizer,
-            TEST_TEMPLATE,
-            {"name": ""},
+    with patch.object(st, "download_button") as mock_dl:
+        # The model's raw output may include <answer>...</answer> wrappers
+        app._render_download_button(
+            MagicMock(),
+            '<answer>{"name": "Alice"}</answer>',
+            download_kind="extract",
+            reasoning=False,
         )
-    mock_display.assert_called_once()
-    args = mock_display.call_args[0]
-    assert args[0] == {"name": "Alice"}
-    assert args[1] == "patient history text"
+    mock_dl.assert_called_once()
+    call = mock_dl.call_args
+    assert call.args[0] == "Download JSON"
+    assert call.kwargs["data"] == '{"name": "Alice"}'  # answer block extracted
+    assert call.kwargs["file_name"] == "extraction.json"
+    assert call.kwargs["mime"] == "application/json"
 
 
-# --- _highlight_source ---
+def test_render_download_button_markdown_mode_keeps_raw_output(app):
+    """Markdown mode → no answer-block extraction, label says 'Download Markdown'."""
+    import streamlit as st
+
+    with patch.object(st, "download_button") as mock_dl:
+        app._render_download_button(
+            MagicMock(),
+            "# Heading\n\nbody text",
+            download_kind="markdown",
+            reasoning=False,
+        )
+    call = mock_dl.call_args
+    assert call.args[0] == "Download Markdown"
+    assert call.kwargs["data"] == "# Heading\n\nbody text"
+    assert call.kwargs["file_name"] == "document.md"
+    assert call.kwargs["mime"] == "text/markdown"
 
 
-def test_highlight_source_wraps_matches(app):
-    html_out = app._highlight_source("The patient has chest pain.", ["chest pain"])
-    assert "<mark>chest pain</mark>" in html_out
+def test_render_download_button_template_mode_treats_as_json(app):
+    """Template mode → applies extract_answer_block, filename is template.json."""
+    import streamlit as st
+
+    with patch.object(st, "download_button") as mock_dl:
+        app._render_download_button(
+            MagicMock(),
+            '{"field": "string"}',
+            download_kind="template",
+            reasoning=False,
+        )
+    call = mock_dl.call_args
+    assert call.args[0] == "Download template"
+    assert call.kwargs["data"] == '{"field": "string"}'
+    assert call.kwargs["file_name"] == "template.json"
 
 
-def test_highlight_source_case_insensitive(app):
-    html_out = app._highlight_source("ASPIRIN 325mg daily", ["aspirin"])
-    assert "<mark>ASPIRIN</mark>" in html_out
+def test_render_download_button_strips_reasoning_trace(app):
+    """When reasoning=True, the <think>...</think> prefix is stripped before
+    the content goes into the download."""
+    import streamlit as st
 
-
-def test_highlight_source_escapes_html(app):
-    html_out = app._highlight_source("<script>bad</script>", ["bad"])
-    # Raw tags must be escaped so <script> cannot execute
-    assert "&lt;script&gt;" in html_out
-    assert "<script>" not in html_out
-
-
-def test_highlight_source_skips_short_needles(app):
-    # Needles under 3 chars are skipped to avoid noise
-    html_out = app._highlight_source("at it is", ["at", "it"])
-    assert "<mark>" not in html_out
-
-
-def test_highlight_source_no_matches(app):
-    html_out = app._highlight_source("The patient", ["foo"])
-    assert "<mark>" not in html_out
-    assert "The patient" in html_out
-
-
-def test_highlight_source_longest_first(app):
-    # "chest pain acute" should be marked, not just "chest pain"
-    html_out = app._highlight_source(
-        "The patient has chest pain acute onset.",
-        ["chest pain", "chest pain acute"],
-    )
-    assert "<mark>chest pain acute</mark>" in html_out
+    with patch.object(st, "download_button") as mock_dl:
+        app._render_download_button(
+            MagicMock(),
+            'reasoning text...</think>{"name": "Bob"}',
+            download_kind="extract",
+            reasoning=True,
+        )
+    assert mock_dl.call_args.kwargs["data"] == '{"name": "Bob"}'

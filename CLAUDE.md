@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-Clinical structured extraction pipeline using NuExtract-1.5-MLX-8bit (`mlx-community/numind-NuExtract-1.5-MLX-8bit`). Extracts structured fields (diagnoses, medications, ICD-10 codes, dosages) from clinical notes and dictation transcripts. Supports long-document chunking with field-aware merge and ICD-10-CM code validation. Streamlit web UI with a single Text input tab.
+Local document understanding app powered by NuExtract3-MLX-8bits (`numind/NuExtract3-mlx-8bits`), a 4B-parameter Qwen3-family vision-language model. Runs on Apple Silicon via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm). Mirrors the official [NuExtract3 HF Space](https://huggingface.co/spaces/numind/NuExtract3) architecture but uses local MLX inference instead of remote vLLM.
+
+Three modes: structured JSON extraction (typed template + image/text → JSON), document-to-markdown (image → Markdown), and template generation (NL description → JSON template). Streaming output with optional `<think>...</think>` reasoning trace.
 
 ## Commands
 
@@ -14,88 +16,66 @@ uv run ruff format .                       # Format
 uv run ty check                            # Type check
 uv run pytest                              # Run tests
 uv run pytest tests/test_file.py::test_name  # Run a single test
+uv run python scripts/probe_mlx_vlm.py     # End-to-end model probe
 ```
 
-CI via GitHub Actions (`.github/workflows/ci.yml`): runs lint, format check, type check, and `pytest` on every push and PR to `main`. Uses `macos-14` (Apple Silicon) runners for MLX compatibility. E2E tests are excluded from CI — run manually with `uv run pytest -m e2e`.
+CI via GitHub Actions (`.github/workflows/ci.yml`): lint, format check, type check, and `pytest` on every push and PR to `main`. Uses `macos-14` (Apple Silicon) runners for MLX compatibility.
 
 ## Architecture
 
-Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.json`, chunking in `chunking.py`, merging in `merging.py`, validation in `validation.py`:
+App in `streamlit_app.py`, runtime wrapper in `nuextract.py`, probe in `scripts/probe_mlx_vlm.py`.
+
+### `nuextract.py`
+
+Thin wrapper around mlx-vlm. Module-level imports of `huggingface_hub.snapshot_download`, `mlx_vlm.load`, `mlx_vlm.stream_generate` so tests can patch via the `nuextract.*` namespace (standard "patch where used" pattern).
+
+- **Constants** — `DEFAULT_MODEL_ID = "numind/NuExtract3-mlx-8bits"`, `DEFAULT_MAX_TOKENS = 4096`, `DEFAULT_TEMPERATURE = 0.0`, `MODE_STRUCTURED`, `MODE_CONTENT`, `MODE_MARKDOWN`, `MODE_TEMPLATE_GENERATION`
+- **`patch_processor_config(local_dir)`** — Patches the MLX repo's `processor_config.json` packaging bug (see Key Details). Idempotent, returns `True` if changed.
+- **`load_model(model_id)`** — `snapshot_download` → `patch_processor_config` → `mlx_vlm.load`. Returns `(model, processor)`.
+- **`build_messages(text, image_path, system_prompt)`** — Builds a chat message list: optional `{"role": "system", "content": ...}` first (string-only — the Jinja raises if it contains images), then a `{"role": "user", "content": [...]}` with `{"type": "image", "image": path}` and/or `{"type": "text", "text": ...}` parts. The Jinja template inserts the vision placeholder; actual pixel data flows separately via `stream_generate(image=...)`.
+- **`render_prompt(processor, messages, *, template, instructions, mode, enable_thinking)`** — Calls `processor.apply_chat_template(...)` with task kwargs **inline** (HF transformers convention), NOT nested under `chat_template_kwargs` (that's a vLLM-specific convention). Omits `None`/empty values so the template's defaults apply.
+- **`stream_extract(model, processor, *, text, image_path, system_prompt, template, instructions, mode, enable_thinking, temperature, max_tokens)`** — Builds messages → renders prompt → calls `mlx_vlm.stream_generate`. Yields **cumulative** text on each chunk (not per-chunk deltas) for direct rendering into a Streamlit placeholder.
+- **`split_reasoning_and_output(text, reasoning_enabled)`** — Splits on `</think>` (case-insensitive). Returns `("", text)` when reasoning is off; returns `(text, "")` when reasoning is on but `</think>` hasn't arrived yet.
+- **`extract_answer_block(text)`** — Pulls `<answer>...</answer>` contents if present, else the longest span at any `{` position that parses via `json.JSONDecoder.raw_decode`, else the stripped text. Correctly handles the "reasoning text + JSON" case without merging unrelated spans.
+- **`pretty_json_or_text(text)`** — Tries `json.loads` + indented re-dump; falls back to the original on parse failure.
 
 ### `streamlit_app.py`
 
-- **Constants** — `MODEL_ID`, `MAX_INPUT_TOKENS`, `DEFAULT_TEMPLATE`
-- **`load_presets(path)`** — Loads extraction presets from JSON file; cached via `@st.cache_data`; falls back to SOAP Note preset if file missing or invalid
-- **`load_model()`** — Loads model and tokenizer via `mlx_lm.load()`; cached via `@st.cache_resource`
-- **`validate_template(template_str)`** — Validates JSON string is a non-empty dict; returns `(parsed, error)`
-- **`build_prompt(template_str, text)`** — Builds NuExtract-1.5 prompt with `<|input|>/<|output|>` format
-- **`extract(text, model, tokenizer, template, max_new_tokens)`** — Runs extraction via `mlx_lm.generate()`; enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); strips `<|end-output|>` marker; returns `(result, was_truncated)`
-- **`_has_config_errors(template_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
-- **`_get_effective_template(json_str, source_format, template_str)`** — Returns JSON template, converting from YAML/Pydantic if needed and updating session state
-- **`ConfigState`** — `NamedTuple` returned by `_render_config()`: `template_str`, `json_str`, `source_format`, `template_error`, `template_parsed`, `max_new_tokens`
-- **`_render_config()`** — Renders inline config controls (preset selector, max tokens slider, template editor, format expander); returns `ConfigState`; called once above the text input; YAML/Pydantic templates show a preview expander with a "Replace template with this JSON" button rather than silently converting
-- **`_describe_token_budget(n_tokens, budget)`** — Returns `(color, message)` tuple: green message when input fits in budget, orange warning with estimated chunk count when over
-- **`_load_icd10_codes()`** — `@st.cache_data` wrapper around `load_icd10_codes()` from `validation.py`; keeps validation logic Streamlit-free
-- **`_collect_invalid_codes(result, path="")`** — Walks result tree, returns `list[tuple[path, code]]` for each dict where `icd10_code_valid is False`; path uses dot-notation for dict keys and bracket-notation for list indices (e.g., `"problems[0]"`, or `"root"` for top-level)
-- **`_extract_strings(value)`** — Flattens an extraction subtree into non-empty string leaves for source-pane highlighting; skips `icd10_code_valid` booleans
-- **`_highlight_source(text, needles)`** — HTML-escapes text and wraps each needle (len >= 3 after strip, deduped, longest-first) in `<mark>` tags; span-tracking prevents double-wrapping when super-phrases enclose sub-phrases
-- **`_result_to_csv(result)`** — Flattens list-of-dict result fields into CSV with a `section` column; returns None if no list-of-dict fields; strips `icd10_code_valid` annotations; stdlib csv/io only
-- **`_display_structured(result)`** — Renders result as structured fields: list-of-dict as column tables (red rows for `icd10_code_valid=False`), nested dicts as subheader + st.json, scalars as disabled text inputs; raw JSON stays in a collapsed expander at the bottom
-- **`_validate_and_display(result, input_text)`** — Annotates ICD-10, renders source ↔ extraction side-by-side via `st.columns([1, 1])`; left pane: selectbox picks which field's strings drive highlighting, source text rendered with `<mark>` tags in a scrollable bordered div; right pane: `_display_structured(result)`; download buttons below: JSON (always) and CSV (only if `_result_to_csv` returns non-None)
-- **`_run_extraction(text, model, tokenizer, template_str, template_parsed, max_new_tokens)`** — Two-path extraction: single-chunk fast path when input fits within token budget, or multi-chunk path with progress bar, `merge_results()`, and ICD-10 validation via `annotate_icd10()`; passes `input_text` to `_validate_and_display` for source highlighting
-- **Streamlit UI** — Config rendered above the text input via `_render_config()` (preset selector + max tokens slider side-by-side, then template editor); input uses `st.tabs(["📋 Paste", "📎 Upload"])` with a text_area in the paste tab and a file_uploader (`.txt`, `.md`) in the upload tab; a live token-count caption appears below when input is non-empty
+Two-column layout. Left: inputs. Right: outputs.
 
-### `utils.py`
+- **`get_model()`** — `@st.cache_resource` wrapper around `nuextract.load_model`.
+- **`_save_uploaded_image(uploaded_file)`** — Persists `st.file_uploader` bytes to a temp file once per upload, keyed on `uploaded_file.file_id` in `st.session_state`. Reruns return the cached path; a new upload deletes the previous temp file before writing the new one. Required because mlx-vlm wants file paths/URLs.
+- **`_validate_template(template_str)`** — Validates JSON template is a non-empty dict; returns `(parsed, error)`.
+- **`_render_output_pane(output_placeholder, reasoning_placeholder, accumulated, *, reasoning_enabled, is_structured)`** — Updates both panes from a single stream chunk: routes reasoning trace to its placeholder (or shows `_(reasoning disabled)_` when off), then renders output as JSON code-block (structured/template-gen modes) or markdown (markdown mode). Shows `_(waiting for output after </think>)_` placeholder while reasoning is in progress.
+- **`_render_download_button(placeholder, accumulated, *, download_kind, reasoning)`** — After a successful run, renders a `st.download_button` inside the download placeholder. `download_kind` is one of `"extract"`, `"template"`, `"markdown"` and controls the label, filename, and whether `extract_answer_block` is applied to strip wrappers.
+- **`_run_mode(...)`** — Drives one streamed generation: calls `_render_output_pane` on every chunk yielded by `stream_extract`, then fills the download placeholder on completion.
+- **Top-level UI** — `st.set_page_config(layout="wide")`, title, model load spinner, then `st.columns([1, 1])` for the two panes. Left pane: image uploader, optional text area, JSON template editor (`DEFAULT_TEMPLATE`), optional instructions, temperature/reasoning/max-tokens controls, three buttons (Extract / Markdown / Template-gen). Right pane: always-rendered Reasoning + Result headers with their placeholders, then a download placeholder. Button handlers validate inputs (markdown requires image; extract requires template + either image or text) and call `_run_mode`.
 
-- **Constants** — `DEFAULT_MAX_NEW_TOKENS = 2048`
-- **`detect_and_convert_template(template_str)`** — Detects template format (JSON → Pydantic → YAML) and converts to JSON; returns `(json_str, source_format, error)` where source_format is `"json"`, `"yaml"`, `"pydantic"`, `"pydantic_with_unknown"`, or `None`; returns error for unrecognized formats
-- **`_parse_pydantic_model(text)`** — Regex-based parser for flat Pydantic BaseModel classes; maps all types to empty string placeholders; lists map to `[]`
-- **`_map_pydantic_type(type_str)`** — Maps individual Pydantic type annotations to NuExtract-1.5 placeholders
+### `scripts/probe_mlx_vlm.py`
 
-### `chunking.py`
+Standalone probe to verify the migration still works on a fresh machine. Five checks:
+1. `mlx_vlm.load()` succeeds on `numind/NuExtract3-mlx-8bits`
+2. `processor.apply_chat_template(template=..., enable_thinking=False)` produces a rendered prompt with the typed template embedded under `【template_start】`
+3. `mode='markdown'` reassigns to `【task】content` (per the Jinja's mode-collapsing logic)
+4. `mode='template-generation'` produces `【task】template generation`
+5. End-to-end `mlx_vlm.generate()` returns parseable JSON for a trivial extraction
 
-- **Constants** — `DEFAULT_CHUNK_TOKENS`, `DEFAULT_OVERLAP_TOKENS`, `HEADER_ATTACH_ZONE`, `SECTION_HEADERS`
-- **`chunk_text(text, tokenizer, max_tokens, overlap) -> list[str]`** — Splits text into overlapping token-window chunks; header-attach rule pushes standalone clinical section headers (e.g. `"ASSESSMENT:\n"`) found in the last `HEADER_ATTACH_ZONE` tokens of a chunk to the start of the next chunk
-- **`_split_long_line(line, tokenizer, max_tokens) -> list[str]`** — Word-boundary fallback for single lines exceeding `max_tokens` (e.g. run-on dictation without line breaks); preserves trailing newline on last sub-line, uses space separator when input has no newline
-
-### `merging.py`
-
-- **`merge_results(results, template) -> dict | None`** — Field-aware merge of multiple per-chunk extraction dicts; scalar fields take the first non-empty value, list fields are concatenated and deduplicated; returns `None` if all inputs are empty
-
-### `validation.py`
-
-- **`load_icd10_codes(path) -> set[str]`** — Loads bundled ICD-10-CM code set from JSON file; returns empty set if file missing
-- **`annotate_icd10(result, codes)`** — Walks the extraction result tree and returns an annotated copy with an `icd10_code_valid` sibling (`true`/`false`) next to each `icd10_code` field; normalizes extracted codes (strip, uppercase, remove dots) before lookup; original dict untouched
-- **`count_invalid_codes(result) -> int`** — Returns the count of ICD-10 codes in the result that failed validation
-
-### `presets.json`
-
-5 clinical extraction presets (SOAP Note, Discharge Summary, H&P, Medication Reconciliation, Problem List) with templates and sample clinical text. Templates use empty string placeholders (`""` for fields, `[]` for arrays). Loaded by `load_presets()` at app startup.
-
-### `data/icd10_cm_2025.json`
-
-Bundled ICD-10-CM code set (dev subset in repo). Filename matches the CMS source year. CMS dotless uppercase format (e.g. `"J18.9"` stored as `"J189"`). Used by `validation.py` for code lookup.
-
-### `scripts/generate_icd10_data.py`
-
-Converts the CMS ICD-10-CM source file to the bundled JSON format consumed by `validation.py`.
-
-Shared fixtures in `tests/conftest.py` (`sample_icd10_codes`, `sample_3_chunk_text`, `sample_per_chunk_results`). Tests in `tests/test_chunking.py` (23 tests), `tests/test_merging.py` (16 tests), `tests/test_validation.py` (16 tests), `tests/test_streamlit_app.py` (83 tests), and `tests/test_utils.py` (16 tests). `tests/test_e2e.py` (3 tests, e2e marker, excluded from CI). Total (excluding e2e): 154 tests.
+Run: `uv run python scripts/probe_mlx_vlm.py`. Exits non-zero on any failure.
 
 ## Key Details
 
-- Default 2048 new tokens per extraction (`DEFAULT_MAX_NEW_TOKENS`); configurable via inline slider (64–4096)
-- Max 4,096 input tokens (`MAX_INPUT_TOKENS`); raises `ValueError` if exceeded per chunk
-- NuExtract-1.5 prompt format: `<|input|>\n### Template:\n{template}\n### Text:\n{text}\n\n<|output|>\n`
-- Template field accepts JSON, YAML, or Pydantic models; YAML/Pydantic auto-detected and shown in a preview expander with a "Replace template with this JSON" button to commit the conversion (no silent auto-convert)
-- Detection order: JSON → Pydantic → YAML (Pydantic before YAML because class syntax is valid YAML)
-- NuExtract-1.5 templates use empty strings (`""`) as field placeholders and empty arrays (`[]`) for list fields
-- Text-only extraction (no image/vision support)
-- No ICL examples (NuExtract-1.5 does not officially support in-context learning)
-- MLX-based inference optimized for Apple Silicon; no GPU device selection needed
-- Supports 6 languages: English, French, Spanish, German, Portuguese, Italian
-- Warning suppression: `transformers.modeling_rope_utils` logger set to ERROR to suppress rope config warning from Phi-3.5 base model
-- Long-document chunking activates when input exceeds `MAX_INPUT_TOKENS - template_overhead`. Default 3500-token chunks with 200-token overlap. Hybrid token-window + header-attach rule (clinical section headers pushed to next chunk if in last 100 tokens).
-- ICD-10-CM validation: bundled code set annotates extracted codes with `icd10_code_valid` sibling. CMS dotless uppercase format. Missing data file → `st.warning('validation skipped')`.
-- Single Text input (no CSV Batch tab); pandas dependency removed
-- Dependencies in `pyproject.toml`; `mlx-lm>=0.20.0` required; `chunking.py`, `merging.py`, `validation.py` are pure-Python stdlib + tokenizer modules (no additional runtime deps)
+- **Model**: `numind/NuExtract3-mlx-8bits` — 8-bit affine quant of NuExtract3 (Qwen3.5 4B base), ~5 GB on disk
+- **Context**: 131K tokens supported by the model, but practical limit is bounded by unified memory + KV cache size
+- **Pinned transformers**: `==5.9.0` (the model's declared `transformers_version` is `5.5.4` but `qwen3_5` only enters the auto-resolver mapping in later versions; `5.9.0` is the verified-working version).
+- **Required torchvision**: HF's `Qwen2VLImageProcessor` requires it even for text-only inference — the processor is constructed eagerly on load.
+- **Packaging-bug shim** in `nuextract.patch_processor_config()`: the MLX repo's `processor_config.json` references `Qwen3VLImageProcessor` (doesn't exist in transformers); upstream `numind/NuExtract3` correctly uses `Qwen2VLImageProcessor`. The shim patches the locally cached copy on every `load_model()` call (idempotent).
+- **Template kwarg API**: HF transformers' `apply_chat_template` accepts template variables as **direct keyword arguments** (e.g. `template="..."`, `mode="..."`, `enable_thinking=False`). The HF Space uses vLLM which expects them nested under `chat_template_kwargs={...}` — that convention does **not** apply to direct HF/mlx-vlm usage.
+- **Modes (from `chat_template.jinja`)**: setting `template=...` forces `mode='structured'`; `mode='markdown'` is reassigned to `'content'`; `mode='template-generation'` and `'document-detection'` are also valid. `enable_thinking=True` is only allowed for `structured` and `content` modes.
+- **Output parsing**: NuExtract3 may emit `<answer>...</answer>` wrappers around structured output or raw JSON. `extract_answer_block` handles both.
+- **Reasoning trace**: model emits `<think>...</think>` before the answer when `enable_thinking=True`. `split_reasoning_and_output` separates them for the two-pane UI.
+- **Image input**: `st.file_uploader` (jpg/jpeg/png/webp), persisted to a temp file before passing to mlx-vlm. No clipboard support (Streamlit limitation vs the Gradio-based HF Space).
+- **No PDF support** in v1 — matches the HF Space; users convert PDFs to images externally.
+
+## Tests
+
+Total: 63 tests in `tests/test_nuextract.py` (39) and `tests/test_streamlit_app.py` (24). The `app` fixture in `test_streamlit_app.py` mocks all Streamlit primitives + `nuextract.load_model` so the module imports cleanly without a real GPU/model.

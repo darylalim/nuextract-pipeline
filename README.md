@@ -1,21 +1,23 @@
 # NuExtract Pipeline
 
-Clinical structured extraction pipeline using [NuExtract-1.5-MLX-8bit](https://huggingface.co/mlx-community/numind-NuExtract-1.5-MLX-8bit). Extracts structured fields (diagnoses, medications, ICD-10 codes, dosages) from clinical notes and dictation transcripts. Streamlit web UI optimized for Apple Silicon via MLX.
+Local document understanding app powered by [NuExtract3-mlx-8bits](https://huggingface.co/numind/NuExtract3-mlx-8bits) — a 4B-parameter vision-language model from NuMind, MLX-quantized for Apple Silicon. Mirrors the [official NuExtract3 Hugging Face Space](https://huggingface.co/spaces/numind/NuExtract3) but runs entirely locally via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm), no GPU or external API required.
 
 ## Features
 
-- **Clinical extraction** — paste a note, pick a preset, get structured JSON output
-- **Long-document chunking** — automatic splitting of notes exceeding the input limit, with overlap and clinical section header-attach; per-chunk results merged field-aware (scalars: first non-empty; lists: union + de-dupe)
-- **ICD-10-CM validation** — extracted codes are annotated `valid`/`invalid` against a bundled CMS code set
-- **Clinical presets** — 5 built-in: SOAP Note, Discharge Summary, H&P, Medication Reconciliation, Problem List
-- **Multi-format templates** — accepts JSON, YAML, or Pydantic model definitions
-- **Configurable output length** — inline slider for max new tokens (64–4096, default 2048)
-- **Multi-language** — supports English, French, Spanish, German, Portuguese, Italian
+- **Three modes** — structured JSON extraction, document-to-markdown conversion, and natural-language → template generation
+- **Multimodal input** — upload an image (screenshot, scan, photo) and/or paste text
+- **Typed template system** — `verbatim-string`, `string`, `integer`, `number`, `date`, `boolean`, enums, multi-enums, and more (see [TYPES.md on Hugging Face](https://huggingface.co/numind/NuExtract3/blob/main/TYPES.md))
+- **Streaming output** — results stream in token-by-token
+- **Optional reasoning mode** — model emits `<think>...</think>` traces shown in a dedicated pane
+- **Download buttons** — save the JSON, markdown, or generated template to disk
+- **Local Apple Silicon inference** — no API key, no network calls during extraction
 
 ## Requirements
 
 - macOS with Apple Silicon (M1/M2/M3/M4)
 - Python 3.12+
+- ~6 GB free disk for the model (downloaded on first run)
+- 16 GB unified memory recommended (more is better for long-context inference)
 
 ## Installation
 
@@ -29,54 +31,32 @@ uv sync
 uv run streamlit run streamlit_app.py
 ```
 
-The model (~4 GB) is downloaded automatically on first run.
+First run downloads the ~5 GB model. Subsequent runs use the local cache.
 
-## ICD-10 Data
+## Modes
 
-The repo ships with a small dev subset of ICD-10-CM codes (`data/icd10_cm_2025.json`) sufficient for the sample presets. For production use, generate the full ~74k-code set from the CMS source:
-
-```bash
-python scripts/generate_icd10_data.py path/to/icd10cm_order_2025.txt data/icd10_cm_2025.json
-```
-
-Source: [CMS 2025 ICD-10-CM](https://www.cms.gov/medicare/coding-billing/icd-10-codes/2025-icd-10-cm).
+| Button | Inputs | Output |
+|---|---|---|
+| **Extract JSON** | Image and/or text + JSON template | Structured JSON matching the template |
+| **Convert to Markdown** | Image (required) | Clean markdown with HTML tables and embedded structure |
+| **Generate template** | Image or text describing the document | A JSON template you can paste back into the editor |
 
 ## Testing
 
 ```bash
-uv run pytest              # Fast unit + integration tests (~2s, 123 tests)
-uv run pytest -m e2e       # End-to-end with real model (slow, opt-in)
+uv run pytest                              # Run all tests
+uv run python scripts/probe_mlx_vlm.py     # End-to-end model probe (downloads + extracts)
 ```
-
-## Clinical Use Guidance
-
-This pipeline is a research / prototype tool. Before using it on real clinical data, review the following:
-
-- **PHI in browser state.** Streamlit keeps the text input and template in the browser session. Content persists until the tab is closed. Don't leave an unattended session open with real clinical text on screen.
-- **Local-only inference.** All extraction runs locally via MLX — no data is sent to external services. Verify this in your deployment (no network calls during extraction).
-- **Code validation is syntactic, not semantic.** `icd10_code_valid: true` means the code exists in the CMS set. It does NOT mean the code is the correct one for the clinical content. Wrong-but-real codes (e.g. bronchitis code assigned to pneumonia text) pass validation silently.
-- **Dose / frequency / route are not validated.** Medication names aren't normalized and dosages aren't range-checked. Extraction output is a starting point for clinical review, not a substitute.
-- **Long-document chunking can miss cross-chunk context.** Overlap reduces but doesn't eliminate this. Critical information at a chunk boundary may be duplicated or underspecified in merged output.
-- **Always review output against the source note** before using extracted data for clinical decisions, billing, or patient records.
 
 ## Project Structure
 
 ```
-streamlit_app.py          # UI, model loading, extraction orchestration
-utils.py                  # Template format detection (JSON/YAML/Pydantic)
-chunking.py               # Text splitting with overlap and header-attach
-merging.py                # Field-aware per-chunk result merging
-validation.py             # ICD-10-CM code annotation
-presets.json              # 5 clinical extraction presets
-data/
-  icd10_cm_2025.json      # Bundled ICD-10-CM code set (dev subset)
+streamlit_app.py            # UI: two-column layout, three buttons, streaming output
+nuextract.py                # mlx-vlm wrapper: load, render prompt, stream extraction
 scripts/
-  generate_icd10_data.py  # CMS source → JSON converter
+  probe_mlx_vlm.py          # Verifies model + template kwargs flow-through end-to-end
 tests/
-  conftest.py             # Shared fixtures
-  test_streamlit_app.py   # App integration tests (51)
-  test_chunking.py        # Chunking tests (22)
-  test_merging.py         # Merging tests (13)
-  test_validation.py      # ICD-10 validation tests (16)
-  test_utils.py           # Template detection tests (16)
+  conftest.py               # sys.path setup
+  test_nuextract.py         # Wrapper tests (39)
+  test_streamlit_app.py     # App helper tests (24)
 ```
