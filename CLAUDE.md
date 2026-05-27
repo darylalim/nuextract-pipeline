@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Local document understanding app powered by NuExtract3-MLX-8bits (`numind/NuExtract3-mlx-8bits`), a 4B-parameter Qwen3-family vision-language model. Runs on Apple Silicon via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm). Mirrors the official [NuExtract3 HF Space](https://huggingface.co/spaces/numind/NuExtract3) architecture but uses local MLX inference instead of remote vLLM.
+Extract structured information from documents, convert images to Markdown, and generate templates with the NuMind NuExtract3 model on Apple Silicon with MLX. Uses `numind/NuExtract3-mlx-8bits` (a 4B-parameter Qwen3-family vision-language model) via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm). Mirrors the official [NuExtract3 HF Space](https://huggingface.co/spaces/numind/NuExtract3) architecture but uses local MLX inference instead of remote vLLM.
 
 Three modes: structured JSON extraction (typed template + image/text → JSON), document-to-markdown (image → Markdown), and template generation (NL description → JSON template). Streaming output with optional `<think>...</think>` reasoning trace.
 
@@ -78,4 +78,8 @@ Run: `uv run python scripts/probe_mlx_vlm.py`. Exits non-zero on any failure.
 
 ## Tests
 
-Total: 63 tests in `tests/test_nuextract.py` (39) and `tests/test_streamlit_app.py` (24). The `app` fixture in `test_streamlit_app.py` mocks all Streamlit primitives + `nuextract.load_model` so the module imports cleanly without a real GPU/model.
+Total: 84 tests across three files, no real model loaded.
+
+- **`tests/test_nuextract.py`** (40) — Pure function tests for the runtime wrapper. `extract_answer_block` and `pretty_json_or_text` cases are parametrized; integration boundaries (`load_model`, `stream_extract`) are tested by patching the `nuextract.*` namespace.
+- **`tests/test_streamlit_app.py`** (24) — Helper function tests. The module-scoped `app` fixture mocks all Streamlit primitives + `nuextract.load_model` so `streamlit_app` imports cleanly without a real model.
+- **`tests/test_streamlit_app_apptest.py`** (20) — End-to-end UI wiring via Streamlit's `AppTest`. `nuextract.load_model` is stubbed out. The `at_with_image` fixture patches `streamlit.file_uploader` to return a fake `UploadedFile` (AppTest can't drive uploads). Covers initial render, button validation, and streaming flow for text- and image-input paths. `st.download_button` isn't exposed by AppTest — its rendering is tested in `test_streamlit_app.py`.

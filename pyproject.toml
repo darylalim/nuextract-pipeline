@@ -1,7 +1,7 @@
 [project]
 name = "nuextract-pipeline"
 version = "1.0.0"
-description = "Local document understanding via NuExtract3-MLX on Apple Silicon: structured extraction, document-to-markdown, and template generation in a Streamlit UI"
+description = "Extract structured information from documents, convert images to Markdown, and generate templates with the NuMind NuExtract3 model on Apple Silicon with MLX."
 requires-python = ">=3.12"
 dependencies = [
     "mlx-vlm==0.4.4",
@@ -16,3 +16,6 @@ dev = [
     "ruff==0.15.0",
     "ty==0.0.16",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

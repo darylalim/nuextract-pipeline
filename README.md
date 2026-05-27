@@ -1,6 +1,6 @@
 # NuExtract Pipeline
 
-Local document understanding app powered by [NuExtract3-mlx-8bits](https://huggingface.co/numind/NuExtract3-mlx-8bits) — a 4B-parameter vision-language model from NuMind, MLX-quantized for Apple Silicon. Mirrors the [official NuExtract3 Hugging Face Space](https://huggingface.co/spaces/numind/NuExtract3) but runs entirely locally via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm), no GPU or external API required.
+Extract structured information from documents, convert images to Markdown, and generate templates with the NuMind NuExtract3 model on Apple Silicon with MLX. Mirrors the [official NuExtract3 Hugging Face Space](https://huggingface.co/spaces/numind/NuExtract3) but runs entirely locally via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm), no GPU or external API required.
 
 ## Features
 
@@ -51,12 +51,13 @@ uv run python scripts/probe_mlx_vlm.py     # End-to-end model probe (downloads +
 ## Project Structure
 
 ```
-streamlit_app.py            # UI: two-column layout, three buttons, streaming output
-nuextract.py                # mlx-vlm wrapper: load, render prompt, stream extraction
+streamlit_app.py                    # UI: two-column layout, three buttons, streaming output
+nuextract.py                        # mlx-vlm wrapper: load, render prompt, stream extraction
 scripts/
-  probe_mlx_vlm.py          # Verifies model + template kwargs flow-through end-to-end
+  probe_mlx_vlm.py                  # Verifies model + template kwargs flow-through end-to-end
 tests/
-  conftest.py               # sys.path setup
-  test_nuextract.py         # Wrapper tests (39)
-  test_streamlit_app.py     # App helper tests (24)
+  conftest.py                       # sys.path setup
+  test_nuextract.py                 # Wrapper tests (40)
+  test_streamlit_app.py             # App helper tests (24)
+  test_streamlit_app_apptest.py     # End-to-end UI tests via Streamlit AppTest (20)
 ```
