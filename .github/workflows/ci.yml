@@ -34,5 +34,6 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
-        # Excludes e2e tests by default (pyproject.toml addopts); those require
-        # the 4 GB model and are run manually with `uv run pytest -m e2e`.
+        # All tests are mocked — none load the real model — so the suite runs
+        # fast on CI. The model-loading smoke check is the manual probe:
+        # `uv run python scripts/probe_mlx_vlm.py` (not run in CI).
