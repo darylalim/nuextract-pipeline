@@ -8,7 +8,7 @@ __pycache__/
 .pytest_cache/
 .ty_cache/
 
-# Secrets / env
+# Secrets / env (.streamlit/config.toml is tracked; only secrets are ignored)
 .env
 .streamlit/secrets.toml
 

@@ -63,11 +63,13 @@ CI (GitHub Actions, Apple Silicon runners) runs lint, format check, type check, 
 ```
 streamlit_app.py                    # UI: two-column layout, three buttons, streaming output
 nuextract.py                        # mlx-vlm wrapper: load, render prompt, stream extraction
+.streamlit/
+  config.toml                       # Theme: GitHub-inspired light/dark palette
 scripts/
   probe_mlx_vlm.py                  # Verifies model + template kwargs flow-through end-to-end
 tests/
   conftest.py                       # sys.path setup
   test_nuextract.py                 # Wrapper tests (40)
-  test_streamlit_app.py             # App helper tests (24)
-  test_streamlit_app_apptest.py     # End-to-end UI tests via Streamlit AppTest (20)
+  test_streamlit_app.py             # App helper tests (25)
+  test_streamlit_app_apptest.py     # End-to-end UI tests via Streamlit AppTest (23)
 ```

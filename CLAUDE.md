@@ -48,12 +48,12 @@ Thin wrapper around mlx-vlm. Module-level imports of `huggingface_hub.snapshot_d
 Two-column layout. Left: inputs. Right: outputs.
 
 - **`get_model()`** — `@st.cache_resource` wrapper around `nuextract.load_model`.
-- **`_save_uploaded_image(uploaded_file)`** — Persists `st.file_uploader` bytes to a temp file once per upload, keyed on `uploaded_file.file_id` in `st.session_state`. Reruns return the cached path; a new upload deletes the previous temp file before writing the new one. Required because mlx-vlm wants file paths/URLs.
+- **`_save_uploaded_image(uploaded_file)`** — Persists `st.file_uploader` bytes to a temp file once per upload, keyed on `uploaded_file.file_id` in `st.session_state`. Reruns return the cached path; a new upload deletes the previous temp file before writing the new one, and removing the upload deletes the orphaned temp file and clears the cached `session_state` keys. Required because mlx-vlm wants file paths/URLs.
 - **`_validate_template(template_str)`** — Validates JSON template is a non-empty dict; returns `(parsed, error)`.
 - **`_render_output_pane(output_placeholder, reasoning_placeholder, accumulated, *, reasoning_enabled, is_structured)`** — Updates both panes from a single stream chunk: routes reasoning trace to its placeholder (or shows `_(reasoning disabled)_` when off), then renders output as JSON code-block (structured/template-gen modes) or markdown (markdown mode). Shows `_(waiting for output after </think>)_` placeholder while reasoning is in progress.
 - **`_render_download_button(placeholder, accumulated, *, download_kind, reasoning)`** — After a successful run, renders a `st.download_button` inside the download placeholder. `download_kind` is one of `"extract"`, `"template"`, `"markdown"` and controls the label, filename, and whether `extract_answer_block` is applied to strip wrappers.
 - **`_run_mode(...)`** — Drives one streamed generation: calls `_render_output_pane` on every chunk yielded by `stream_extract`, then fills the download placeholder on completion.
-- **Top-level UI** — `st.set_page_config(layout="wide")`, title, model load spinner, then `st.columns([1, 1])` for the two panes. Left pane: image uploader, optional text area, JSON template editor (`DEFAULT_TEMPLATE`), optional instructions, temperature/reasoning/max-tokens controls, three buttons (Extract / Markdown / Template-gen). Right pane: always-rendered Reasoning + Result headers with their placeholders, then a download placeholder. Button handlers validate inputs (markdown requires image; extract requires template + either image or text) and call `_run_mode`.
+- **Top-level UI** — `st.set_page_config(page_icon=":material/document_scanner:", layout="wide")`, title, model load spinner, then `st.columns([1, 1])` for the two panes. Left pane: image uploader, optional text area, JSON template editor (`DEFAULT_TEMPLATE`), optional instructions, temperature/reasoning/max-tokens controls, three buttons (Extract / Markdown / Template-gen) with Material Symbols icons. Right pane: always-rendered Reasoning + Result headers with their placeholders, then a download placeholder. Button handlers validate inputs (markdown requires image; extract requires template + either image or text) and call `_run_mode`.
 
 ### `scripts/probe_mlx_vlm.py`
 
@@ -78,12 +78,13 @@ Run: `uv run python scripts/probe_mlx_vlm.py`. Exits non-zero on any failure.
 - **Output parsing**: NuExtract3 may emit `<answer>...</answer>` wrappers around structured output or raw JSON. `extract_answer_block` handles both.
 - **Reasoning trace**: model emits `<think>...</think>` before the answer when `enable_thinking=True`. `split_reasoning_and_output` separates them for the two-pane UI.
 - **Image input**: `st.file_uploader` (jpg/jpeg/png/webp), persisted to a temp file before passing to mlx-vlm. No clipboard support (Streamlit limitation vs the Gradio-based HF Space).
+- **Theme**: `.streamlit/config.toml` sets a GitHub-inspired light/dark palette (keys validated against the Streamlit 1.58 schema). Tracked in git — only `.streamlit/secrets.toml` is ignored.
 - **No PDF support** in v1 — matches the HF Space; users convert PDFs to images externally.
 
 ## Tests
 
-Total: 84 tests across three files, no real model loaded.
+Total: 88 tests across three files, no real model loaded.
 
 - **`tests/test_nuextract.py`** (40) — Pure function tests for the runtime wrapper. `extract_answer_block` and `pretty_json_or_text` cases are parametrized; integration boundaries (`load_model`, `stream_extract`) are tested by patching the `nuextract.*` namespace.
-- **`tests/test_streamlit_app.py`** (24) — Helper function tests. The module-scoped `app` fixture mocks all Streamlit primitives + `nuextract.load_model` so `streamlit_app` imports cleanly without a real model.
-- **`tests/test_streamlit_app_apptest.py`** (20) — End-to-end UI wiring via Streamlit's `AppTest`. `nuextract.load_model` is stubbed out. The `at_with_image` fixture drives a fake image into `st.file_uploader` via AppTest's native `set_value` API (added in Streamlit 1.56), exercising the real widget. Covers initial render, button validation, and streaming flow for text- and image-input paths. `st.download_button` isn't exposed by AppTest — its rendering is tested in `test_streamlit_app.py`.
+- **`tests/test_streamlit_app.py`** (25) — Helper function tests. The module-scoped `app` fixture mocks all Streamlit primitives + `nuextract.load_model` so `streamlit_app` imports cleanly without a real model. Includes a regression test that removing an upload cleans up the orphaned temp file and session state.
+- **`tests/test_streamlit_app_apptest.py`** (23) — End-to-end UI wiring via Streamlit's `AppTest`. `nuextract.load_model` is stubbed out. The `at_with_image` fixture drives a fake image into `st.file_uploader` via AppTest's native `set_value` API (added in Streamlit 1.56), exercising the real widget. Covers initial render, button validation, and streaming flow for text- and image-input paths (including the instructions field, template-gen system prompt, and template-gen reasoning override). `st.download_button` isn't exposed by AppTest — its rendering is tested in `test_streamlit_app.py`.
