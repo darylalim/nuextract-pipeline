@@ -183,6 +183,7 @@ def test_extract_with_text_streams_json_output(at, stream_captor):
     assert any('"name": "Alice"' in c.value for c in at.code)
     assert captured["text"] == "doc text"
     assert captured["mode"] is None
+    assert captured.get("system_prompt") is None  # Extract sends no system prompt
 
 
 def test_template_gen_with_text_streams_json_output(at, stream_captor):
@@ -334,6 +335,7 @@ def test_markdown_happy_path_renders_markdown(at_with_image, stream_captor):
     assert any("Document Title" in m.value for m in at_with_image.markdown)
     assert captured["mode"] == "markdown"
     assert captured["image_path"]  # real temp file path written by _save_uploaded_image
+    assert captured.get("system_prompt") is None  # Markdown sends no system prompt
 
 
 def test_extract_with_image_only_streams_json(at_with_image, stream_captor):

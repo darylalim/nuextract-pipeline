@@ -105,16 +105,21 @@ def test_save_uploaded_image_none_cleans_up_orphaned_temp_file(app):
     prior.file_id = "id-1"
     prior.getvalue.return_value = b"\x89PNG"
     path = app._save_uploaded_image(prior)
-    assert Path(path).exists()
-    assert st.session_state[app._IMG_PATH_KEY] == path
+    try:
+        assert Path(path).exists()
+        assert st.session_state[app._IMG_PATH_KEY] == path
 
-    # Next rerun after the user removes the upload: uploader yields None.
-    result = app._save_uploaded_image(None)
+        # Next rerun after the user removes the upload: uploader yields None.
+        result = app._save_uploaded_image(None)
 
-    assert result is None
-    assert not Path(path).exists()  # orphaned temp file cleaned up
-    assert app._IMG_PATH_KEY not in st.session_state
-    assert app._IMG_ID_KEY not in st.session_state
+        assert result is None
+        assert not Path(path).exists()  # orphaned temp file cleaned up
+        assert app._IMG_PATH_KEY not in st.session_state
+        assert app._IMG_ID_KEY not in st.session_state
+    finally:
+        # Don't leak the temp file into the system temp dir if an assertion
+        # fails before the code-under-test deletes it (no-op on a passing run).
+        Path(path).unlink(missing_ok=True)
 
 
 def test_save_uploaded_image_persists_bytes_to_temp(app, tmp_path):

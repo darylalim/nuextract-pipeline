@@ -294,7 +294,7 @@ with col_left:
         reasoning = st.checkbox(
             "Reasoning",
             value=False,
-            help="Show the model's <think> trace in the Reasoning pane.",
+            help="Show the model's `<think>` trace in the Reasoning pane.",
             key="reasoning_checkbox",
         )
     with col_tokens:
