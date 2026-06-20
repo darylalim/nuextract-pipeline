@@ -1,5 +1,5 @@
 [project]
-name = "nuextract-pipeline"
+name = "nuextract-studio"
 version = "1.0.0"
 description = "Extract structured information from documents, convert images to Markdown, and generate templates with the NuMind NuExtract3 model on Apple Silicon with MLX."
 requires-python = ">=3.12"

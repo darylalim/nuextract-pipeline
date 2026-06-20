@@ -1058,7 +1058,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nuextract-pipeline"
+name = "nuextract-studio"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
