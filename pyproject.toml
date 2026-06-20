@@ -17,5 +17,9 @@ dev = [
     "ty==0.0.51",
 ]
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]  # line length is handled by the formatter
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

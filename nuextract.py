@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from huggingface_hub import snapshot_download
 from mlx_vlm import load as mlx_vlm_load
