@@ -5,10 +5,10 @@ that the helper-function tests in test_streamlit_app.py don't exercise. Mocks
 nuextract.load_model and the underlying snapshot/mlx loaders so no 5 GB model
 download happens.
 
-File-upload paths use the at_with_image fixture, which patches
-streamlit.file_uploader to return a fake UploadedFile (AppTest can't drive
-uploads directly). st.download_button isn't exposed by AppTest at all; its
-rendering is covered separately in test_streamlit_app.py.
+File-upload paths use the at_with_image fixture, which drives a fake image
+into st.file_uploader via AppTest's native set_value API (added in Streamlit
+1.56). st.download_button isn't exposed by AppTest at all; its rendering is
+covered separately in test_streamlit_app.py.
 """
 
 import json
@@ -43,20 +43,20 @@ def at(monkeypatch):
 
 @pytest.fixture
 def at_with_image(at, monkeypatch):
-    """AppTest with st.file_uploader patched to return a fake UploadedFile.
+    """AppTest with a fake image driven into st.file_uploader.
 
-    AppTest can't drive st.file_uploader directly, so we patch the streamlit
-    function itself. The script's natural code path then calls
-    _save_uploaded_image(fake) which writes a real temp file and produces a
-    valid image_path. st.image is no-op'd because the fake isn't a real image.
-    Cleans up the resulting temp file on teardown.
+    Streamlit 1.56+ lets AppTest drive st.file_uploader natively, so we register
+    a fake image via file_uploader(...).set_value(...) — exercising the real
+    widget instead of patching it out. The script's natural code path then calls
+    _save_uploaded_image(...), which writes a real temp file and produces a valid
+    image_path. st.image is no-op'd because the fake bytes aren't a decodable
+    image. Cleans up the resulting temp file on teardown.
     """
-    fake = MagicMock()
-    fake.name = "test.png"
-    fake.file_id = "apptest-image"
-    fake.getvalue.return_value = b"\x89PNG\r\n\x1a\n"
-    monkeypatch.setattr("streamlit.file_uploader", lambda *_, **__: fake)
     monkeypatch.setattr("streamlit.image", lambda *_, **__: None)
+    at.file_uploader(key="image_input").set_value(
+        ("test.png", b"\x89PNG\r\n\x1a\n", "image/png")
+    )
+    at.run()
     yield at
     # Lazy import is safe here: AppTest already loaded streamlit_app, so this
     # is a sys.modules lookup, not a re-execution of the script body.
