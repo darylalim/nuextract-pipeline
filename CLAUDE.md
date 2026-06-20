@@ -21,7 +21,9 @@ uv run python scripts/probe_mlx_vlm.py     # End-to-end model probe
 
 When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and ruff to ensure best practices are followed.
 
-CI via GitHub Actions (`.github/workflows/ci.yml`): lint, format check, type check, and `pytest` on every push and PR to `main`. Uses `macos-14` (Apple Silicon) runners for MLX compatibility.
+CI via GitHub Actions (`.github/workflows/ci.yml`): lint, format check, type check, and `pytest` on every push and PR to `main`. Uses `macos-14` (Apple Silicon) runners for MLX compatibility. All four steps gate the build.
+
+Lint/type config lives in `pyproject.toml`: Ruff selects `E`/`F`/`I` (import sort)/`UP` (pyupgrade), with line length deferred to the formatter (`ignore = ["E501"]`); ty targets the `requires-python` floor (3.12) with `error-on-warning`.
 
 ## Architecture
 

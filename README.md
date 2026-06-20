@@ -48,6 +48,16 @@ uv run pytest                              # Run all tests
 uv run python scripts/probe_mlx_vlm.py     # End-to-end model probe (downloads + extracts)
 ```
 
+## Development
+
+```bash
+uv run ruff check .      # Lint
+uv run ruff format .     # Format
+uv run ty check          # Type check
+```
+
+CI (GitHub Actions, Apple Silicon runners) runs lint, format check, type check, and tests on every push and PR to `main`.
+
 ## Project Structure
 
 ```

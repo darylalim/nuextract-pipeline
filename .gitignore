@@ -1,11 +1,18 @@
-.DS_Store
-.env
+# Python
 __pycache__/
 *.pyc
 .venv/
+
+# Tool caches
 .ruff_cache/
 .pytest_cache/
 .ty_cache/
+
+# Secrets / env
+.env
 .streamlit/secrets.toml
+
+# OS / local
+.DS_Store
 .worktrees/
 docs/
