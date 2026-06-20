@@ -236,7 +236,7 @@ with col_left:
         "Image", type=["jpg", "jpeg", "png", "webp"], key="image_input"
     )
     if uploaded_image is not None:
-        st.image(uploaded_image, use_container_width=True)
+        st.image(uploaded_image, width="stretch")
 
     text_input = st.text_area(
         "Text (optional)",
