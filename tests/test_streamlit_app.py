@@ -91,6 +91,32 @@ def test_save_uploaded_image_none_returns_none(app):
     assert app._save_uploaded_image(None) is None
 
 
+def test_save_uploaded_image_none_cleans_up_orphaned_temp_file(app):
+    """Removing the upload (uploader returns None) deletes the previously
+    written temp file and clears the cached session_state keys, instead of
+    leaking the file on disk and leaving stale state behind."""
+    import streamlit as st
+
+    st.session_state.clear()
+
+    # Simulate a prior upload: a real temp file recorded in session_state.
+    prior = MagicMock()
+    prior.name = "doc.png"
+    prior.file_id = "id-1"
+    prior.getvalue.return_value = b"\x89PNG"
+    path = app._save_uploaded_image(prior)
+    assert Path(path).exists()
+    assert st.session_state[app._IMG_PATH_KEY] == path
+
+    # Next rerun after the user removes the upload: uploader yields None.
+    result = app._save_uploaded_image(None)
+
+    assert result is None
+    assert not Path(path).exists()  # orphaned temp file cleaned up
+    assert app._IMG_PATH_KEY not in st.session_state
+    assert app._IMG_ID_KEY not in st.session_state
+
+
 def test_save_uploaded_image_persists_bytes_to_temp(app, tmp_path):
     fake_upload = MagicMock()
     fake_upload.name = "test.png"
