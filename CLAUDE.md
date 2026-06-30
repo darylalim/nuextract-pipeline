@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Extract structured information from documents, convert images to Markdown, and generate templates with the NuMind NuExtract3 model on Apple Silicon with MLX. Uses `numind/NuExtract3-mlx-8bits` (a 4B-parameter Qwen3-family vision-language model) via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm). Mirrors the official [NuExtract3 HF Space](https://huggingface.co/spaces/numind/NuExtract3) architecture but uses local MLX inference instead of remote vLLM.
+Streamlit application for structured extraction, document understanding, and template generation with NuMind NuExtract on Apple Silicon with MLX. Uses `numind/NuExtract3-mlx-8bits` (a 4B-parameter Qwen3-family vision-language model) via [mlx-vlm](https://github.com/Blaizzy/mlx-vlm). Mirrors the official [NuExtract3 HF Space](https://huggingface.co/spaces/numind/NuExtract3) architecture but uses local MLX inference instead of remote vLLM.
 
 Three modes: structured JSON extraction (typed template + image/text → JSON), document-to-markdown (image → Markdown), and template generation (NL description → JSON template). Streaming output with optional `<think>...</think>` reasoning trace.
 
