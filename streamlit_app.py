@@ -227,6 +227,135 @@ def _run_mode(
     )
 
 
+@st.fragment
+def _output_section(model: Any, processor: Any) -> None:
+    """Fragment: action buttons + the streamed reasoning/result/download panes.
+
+    Isolated in a fragment so clicking a generate button reruns only this
+    region — the input widgets in the left column keep their state and are not
+    re-rendered while a generation runs. The buttons must live inside the
+    fragment for that isolation to apply (a fragment only reruns on its own
+    when the triggering widget is inside it). Input values are read from
+    session_state, which the keyed left-column widgets populate on the full
+    rerun that precedes this fragment.
+    """
+    col_b1, col_b2, col_b3 = st.columns(3)
+    with col_b1:
+        btn_extract = st.button(
+            "Extract JSON",
+            type="primary",
+            icon=":material/data_object:",
+            width="stretch",
+            key="extract_button",
+        )
+    with col_b2:
+        btn_markdown = st.button(
+            "Convert to Markdown",
+            icon=":material/article:",
+            width="stretch",
+            key="markdown_button",
+        )
+    with col_b3:
+        btn_template = st.button(
+            "Generate template",
+            icon=":material/auto_awesome:",
+            width="stretch",
+            key="template_button",
+        )
+
+    st.markdown("**Reasoning**")
+    reasoning_placeholder = st.empty()
+    st.markdown("**Result**")
+    output_placeholder = st.empty()
+    download_placeholder = st.empty()
+
+    # Idle hint shown until a generation runs (the handlers below overwrite the
+    # placeholder), so the Result pane is not blank on first load.
+    output_placeholder.caption("Choose an action above to generate output.")
+
+    # Inputs live in the left column (outside this fragment); read their current
+    # values from session_state via their widget keys.
+    image_path = _save_uploaded_image(st.session_state.get("image_input"))
+    text = st.session_state.get("text_input", "")
+    template_str = st.session_state.get("template_input", "")
+    instructions = st.session_state.get("instructions_input", "")
+    temperature = st.session_state.get("temperature_slider", 0.0)
+    reasoning = st.session_state.get("reasoning_checkbox", False)
+    max_tokens = st.session_state.get("max_tokens_slider", DEFAULT_MAX_TOKENS)
+
+    if btn_extract:
+        _, error = _validate_template(template_str)
+        if error:
+            output_placeholder.error(f"Template error: {error}")
+        elif not image_path and not text.strip():
+            output_placeholder.warning("Provide an image, text, or both.")
+        else:
+            _run_mode(
+                mode_label="Extracting",
+                model=model,
+                processor=processor,
+                image_path=image_path,
+                text=text,
+                template=template_str,
+                instructions=instructions or None,
+                mode=None,
+                reasoning=reasoning,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                download_kind="extract",
+                reasoning_placeholder=reasoning_placeholder,
+                output_placeholder=output_placeholder,
+                download_placeholder=download_placeholder,
+            )
+    elif btn_markdown:
+        if not image_path:
+            output_placeholder.warning(
+                "Markdown conversion requires an image of the document."
+            )
+        else:
+            _run_mode(
+                mode_label="Converting to Markdown",
+                model=model,
+                processor=processor,
+                image_path=image_path,
+                text="",
+                template=None,
+                instructions=None,
+                mode=MODE_MARKDOWN,
+                reasoning=reasoning,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                download_kind="markdown",
+                reasoning_placeholder=reasoning_placeholder,
+                output_placeholder=output_placeholder,
+                download_placeholder=download_placeholder,
+            )
+    elif btn_template:
+        if not image_path and not text.strip():
+            output_placeholder.warning(
+                "Template generation needs an image or text to describe the document."
+            )
+        else:
+            _run_mode(
+                mode_label="Generating template",
+                model=model,
+                processor=processor,
+                image_path=image_path,
+                text=text,
+                system_prompt=TEMPLATE_GEN_GUIDANCE,
+                template=None,
+                instructions=None,
+                mode=MODE_TEMPLATE_GENERATION,
+                reasoning=False,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                download_kind="template",
+                reasoning_placeholder=reasoning_placeholder,
+                output_placeholder=output_placeholder,
+                download_placeholder=download_placeholder,
+            )
+
+
 # --- Streamlit UI ---
 
 st.set_page_config(
@@ -252,7 +381,9 @@ with col_left:
     if uploaded_image is not None:
         st.image(uploaded_image, width="stretch")
 
-    text_input = st.text_area(
+    # Keyed inputs feed session_state; the _output_section fragment reads their
+    # values by key rather than capturing the return values here.
+    st.text_area(
         "Text (optional)",
         height=100,
         placeholder="Paste document text here, or use the image above.",
@@ -264,7 +395,7 @@ with col_left:
     st.caption(
         "Describe each field with a type hint, e.g. string, number, or YYYY-MM-DD."
     )
-    template_input = st.text_area(
+    st.text_area(
         "Template",
         value=DEFAULT_TEMPLATE,
         height=240,
@@ -272,7 +403,7 @@ with col_left:
         key="template_input",
     )
 
-    instructions_input = st.text_area(
+    st.text_area(
         "Instructions (optional)",
         height=80,
         placeholder="Extra guidance for the model, e.g. 'use British date format'.",
@@ -281,7 +412,7 @@ with col_left:
 
     col_temp, col_reason, col_tokens = st.columns([2, 1, 2])
     with col_temp:
-        temperature = st.slider(
+        st.slider(
             "Temperature",
             0.0,
             1.0,
@@ -291,14 +422,14 @@ with col_left:
             key="temperature_slider",
         )
     with col_reason:
-        reasoning = st.checkbox(
+        st.checkbox(
             "Reasoning",
             value=False,
             help="Show the model's `<think>` trace in the Reasoning pane.",
             key="reasoning_checkbox",
         )
     with col_tokens:
-        max_tokens = st.slider(
+        st.slider(
             "Max tokens",
             256,
             8192,
@@ -308,113 +439,6 @@ with col_left:
             key="max_tokens_slider",
         )
 
-    st.space("medium")
-    col_b1, col_b2, col_b3 = st.columns(3)
-    with col_b1:
-        btn_extract = st.button(
-            "Extract JSON",
-            type="primary",
-            icon=":material/data_object:",
-            width="stretch",
-            key="extract_button",
-        )
-    with col_b2:
-        btn_markdown = st.button(
-            "Convert to Markdown",
-            icon=":material/article:",
-            width="stretch",
-            key="markdown_button",
-        )
-    with col_b3:
-        btn_template = st.button(
-            "Generate template",
-            icon=":material/auto_awesome:",
-            width="stretch",
-            key="template_button",
-        )
-
 with col_right:
     st.subheader("Output")
-    st.markdown("**Reasoning**")
-    reasoning_placeholder = st.empty()
-    st.markdown("**Result**")
-    output_placeholder = st.empty()
-    download_placeholder = st.empty()
-
-# --- Button handlers ---
-
-image_path = _save_uploaded_image(uploaded_image)
-
-if btn_extract:
-    parsed, error = _validate_template(template_input)
-    if error:
-        output_placeholder.error(f"Template error: {error}")
-    elif not image_path and not text_input.strip():
-        output_placeholder.warning("Provide an image, text, or both.")
-    else:
-        _run_mode(
-            mode_label="Extracting",
-            model=model,
-            processor=processor,
-            image_path=image_path,
-            text=text_input,
-            template=template_input,
-            instructions=instructions_input or None,
-            mode=None,
-            reasoning=reasoning,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            download_kind="extract",
-            reasoning_placeholder=reasoning_placeholder,
-            output_placeholder=output_placeholder,
-            download_placeholder=download_placeholder,
-        )
-
-elif btn_markdown:
-    if not image_path:
-        output_placeholder.warning(
-            "Markdown conversion requires an image of the document."
-        )
-    else:
-        _run_mode(
-            mode_label="Converting to Markdown",
-            model=model,
-            processor=processor,
-            image_path=image_path,
-            text="",
-            template=None,
-            instructions=None,
-            mode=MODE_MARKDOWN,
-            reasoning=reasoning,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            download_kind="markdown",
-            reasoning_placeholder=reasoning_placeholder,
-            output_placeholder=output_placeholder,
-            download_placeholder=download_placeholder,
-        )
-
-elif btn_template:
-    if not image_path and not text_input.strip():
-        output_placeholder.warning(
-            "Template generation needs an image or text to describe the document."
-        )
-    else:
-        _run_mode(
-            mode_label="Generating template",
-            model=model,
-            processor=processor,
-            image_path=image_path,
-            text=text_input,
-            system_prompt=TEMPLATE_GEN_GUIDANCE,
-            template=None,
-            instructions=None,
-            mode=MODE_TEMPLATE_GENERATION,
-            reasoning=False,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            download_kind="template",
-            reasoning_placeholder=reasoning_placeholder,
-            output_placeholder=output_placeholder,
-            download_placeholder=download_placeholder,
-        )
+    _output_section(model, processor)

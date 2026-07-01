@@ -35,6 +35,7 @@ def app():
             ],
         ),
         patch.object(st, "cache_resource", side_effect=lambda f: f),
+        patch.object(st, "fragment", side_effect=lambda f: f),
         patch.object(st, "session_state", {}),
         patch("streamlit_app.load_model", return_value=(MagicMock(), MagicMock())),
     ):
