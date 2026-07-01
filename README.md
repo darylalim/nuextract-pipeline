@@ -16,7 +16,7 @@ Streamlit application for structured extraction, document understanding, and tem
 
 - macOS with Apple Silicon (M1/M2/M3/M4)
 - Python 3.12+
-- ~6 GB free disk for the model (downloaded on first run)
+- ~6 GB free disk — the model is ~5 GB (downloaded on first run), plus headroom
 - 16 GB unified memory recommended (more is better for long-context inference)
 
 ## Installation

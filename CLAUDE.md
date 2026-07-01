@@ -86,7 +86,7 @@ Run: `uv run python scripts/probe_mlx_vlm.py`. Exits non-zero on any failure.
 
 ## Tests
 
-Total: 90 tests across three files, no real model loaded.
+Total: 90 tests across three files, no real model loaded. These are `pytest`-collected counts — parametrization expands `test_nuextract.py`'s 29 `def test_` functions into 40 cases, so a raw `grep -c 'def test_'` undercounts.
 
 - **`tests/test_nuextract.py`** (40) — Pure function tests for the runtime wrapper. `extract_answer_block` and `pretty_json_or_text` cases are parametrized; integration boundaries (`load_model`, `stream_extract`) are tested by patching the `nuextract.*` namespace.
 - **`tests/test_streamlit_app.py`** (25) — Helper function tests. The module-scoped `app` fixture mocks all Streamlit primitives + `nuextract.load_model` so `streamlit_app` imports cleanly without a real model (`st.fragment` is patched to an identity decorator so the `_output_section` fragment body runs under the mocks). Includes a regression test that removing an upload cleans up the orphaned temp file and session state.
