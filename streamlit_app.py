@@ -407,7 +407,7 @@ with col_left:
         key="instructions_input",
     )
 
-    col_temp, col_reason, col_tokens = st.columns([2, 1, 2])
+    col_temp, col_tokens = st.columns(2)
     with col_temp:
         st.slider(
             "Temperature",
@@ -417,13 +417,6 @@ with col_left:
             0.05,
             help="0 is deterministic; raise for more varied output.",
             key="temperature_slider",
-        )
-    with col_reason:
-        st.checkbox(
-            "Reasoning",
-            value=False,
-            help="Show the model's `<think>` trace in the Reasoning pane.",
-            key="reasoning_checkbox",
         )
     with col_tokens:
         st.slider(
@@ -435,6 +428,14 @@ with col_left:
             help="Upper bound on generated tokens.",
             key="max_tokens_slider",
         )
+    # Own full-width line so the "Reasoning" label never wraps (it did when
+    # squeezed into a narrow middle column alongside the two sliders).
+    st.checkbox(
+        "Reasoning",
+        value=False,
+        help="Show the model's `<think>` trace in the Reasoning pane.",
+        key="reasoning_checkbox",
+    )
 
 with col_right:
     st.subheader("Output")
