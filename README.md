@@ -73,3 +73,13 @@ tests/
   test_streamlit_app.py             # App helper tests (25)
   test_streamlit_app_apptest.py     # End-to-end UI tests via Streamlit AppTest (25)
 ```
+
+## Acknowledgments
+
+- Mirrors the architecture of the official [NuExtract3 Hugging Face Space](https://huggingface.co/spaces/numind/NuExtract3) (MIT) by [NuMind](https://numind.ai), reimplemented for local Apple Silicon inference.
+- Uses the [`numind/NuExtract3`](https://huggingface.co/numind/NuExtract3) model (Apache-2.0, built on Qwen3.5-4B), run via the [`numind/NuExtract3-mlx-8bits`](https://huggingface.co/numind/NuExtract3-mlx-8bits) quantization. The model weights are downloaded at runtime and are not redistributed by this project.
+- Built on [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) and [Streamlit](https://streamlit.io).
+
+## License
+
+Released under the [MIT License](LICENSE). The NuExtract model weights are licensed separately (Apache-2.0) by NuMind.
