@@ -395,7 +395,7 @@ with col_left:
     st.text_area(
         "Template",
         value=DEFAULT_TEMPLATE,
-        height=240,
+        height=320,
         label_visibility="collapsed",
         key="template_input",
     )
