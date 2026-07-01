@@ -83,6 +83,7 @@ Run: `uv run python scripts/probe_mlx_vlm.py`. Exits non-zero on any failure.
 - **Image input**: `st.file_uploader` (jpg/jpeg/png/webp), persisted to a temp file before passing to mlx-vlm. No clipboard support (Streamlit limitation vs the Gradio-based HF Space).
 - **Theme**: `.streamlit/config.toml` sets a GitHub-inspired light/dark palette (keys validated against the Streamlit 1.58 schema). Tracked in git — only `.streamlit/secrets.toml` is ignored.
 - **No PDF support** in v1 — matches the HF Space; users convert PDFs to images externally.
+- **License**: project code is **MIT** (`LICENSE` at repo root — verbatim SPDX text so GitHub's detector recognizes it; also declared in `pyproject.toml` via PEP 639 `license = "MIT"` + `license-files = ["LICENSE"]`). The NuExtract3 model weights are separately **Apache-2.0** and downloaded at runtime (not redistributed by this repo), so the model license governs model usage, not this project's code. README has Acknowledgments + License sections crediting the upstream MIT HF Space.
 
 ## Tests
 
