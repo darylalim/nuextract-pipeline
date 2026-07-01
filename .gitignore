@@ -16,4 +16,10 @@ __pycache__/
 .DS_Store
 .worktrees/
 docs/
-.claude/
+
+# Claude Code: share team hooks + project settings, keep personal settings local.
+# Ignore the directory *contents* (not the dir) so specific paths can be negated —
+# git can't re-include a file whose parent directory is excluded.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
